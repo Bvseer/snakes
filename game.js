@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.7';
+import * as G from './sim.js?v=1.8';
 
-export const VERSION = '1.7';
+export const VERSION = '1.8';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -139,7 +139,8 @@ function applySnap(o) {
   const evs = G.apply(M, o); curTick = o.tm;
   for (const e of evs) onEvent(e);
   if (M.ph === 'over' && MODE !== 'demo' && !overShown) { overShown = true; setTimeout(showOver, 1300); }
-  if (M.ph === 'play' && o.full && o.tm <= 0) { overShown = false; show(null); $('hud').classList.toggle('on', MODE !== 'demo'); }
+  // a new round of your own hides the menus; the bots' round behind the menu never does
+  if (M.ph === 'play' && o.full && o.tm <= 0 && MODE !== 'demo') { overShown = false; show(null); $('hud').classList.add('on'); }
 }
 function newLocal(withMe) {
   LS = G.newGame((Math.random()*1e9) | 0); if (withMe) G.addSnake(LS, 'me', 'Ты', false); G.fillBots(LS); if (!withMe) LS.tm = 0;
