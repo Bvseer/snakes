@@ -12,9 +12,10 @@ const haptic = (k) => { try { TG && TG.HapticFeedback && TG.HapticFeedback.impac
 
 // ---- renderer --------------------------------------------------------------
 const canvas = $('gl');
-const R = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const HIDPI = (window.devicePixelRatio || 1) >= 2;
+const R = new THREE.WebGLRenderer({ canvas, antialias: !HIDPI, powerPreference: 'high-performance' });
 R.setClearColor(0x04050c); R.outputColorSpace = THREE.SRGBColorSpace;
-let DPR = Math.min(window.devicePixelRatio || 1, 2); R.setPixelRatio(DPR);
+const DPRMAX = Math.min(window.devicePixelRatio || 1, 1.75); let DPR = Math.min(DPRMAX, 1.5); R.setPixelRatio(DPR);
 const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x04050c, 70, 150);
 const cam = new THREE.PerspectiveCamera(50, 1, 0.5, 400);
 function resize() { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w/h; cam.fov = w < h ? 64 : 48; cam.updateProjectionMatrix(); }
@@ -32,12 +33,12 @@ const floorMat = new THREE.ShaderMaterial({
       float d = length(vP), inside = smoothstep(uR+.25, uR-.25, d);
       vec3 ringC = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn);
       vec3 c = vec3(.015,.02,.05);
-      float g = line(vP, 2.)*.13 + line(vP, 10.)*.3;
+      float g = line(vP, 2.)*.08 + line(vP, 10.)*.18;
       c += mix(vec3(.5,.05,.12)*.5, vec3(0.,.55,.8), inside)*g*(inside*.9+.25);
       c += vec3(.0,.02,.05)*inside;
-      for (int i=0;i<${HEADS};i++){ vec2 dp = vP-uHeads[i].xy; c += uCols[i]*uHeads[i].z*(.55/(1.+dot(dp,dp)*.18) + g*2.2/(1.+dot(dp,dp)*.08)); }
+      for (int i=0;i<${HEADS};i++){ vec2 dp = vP-uHeads[i].xy; c += uCols[i]*uHeads[i].z*(.22/(1.+dot(dp,dp)*.2) + g*1.1/(1.+dot(dp,dp)*.08)); }
       float ring = exp(-abs(d-uR)*2.2);
-      c += ringC*ring*(.9+.25*sin(uTime*4.));
+      c += ringC*ring*(.5+.12*sin(uTime*4.));
       c *= 1.-smoothstep(uR+8., uR+45., d)*.85;
       gl_FragColor = vec4(c,1.);
     }`,
@@ -48,7 +49,7 @@ const floor = new THREE.Mesh(new THREE.PlaneGeometry(420, 420), floorMat); floor
 const wallMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
   uniforms: { uTime: U.time, uWarn: { value: 0 } },
   vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-  fragmentShader: `uniform float uTime, uWarn; varying vec2 vU; void main(){ float a = pow(1.-vU.y, 2.2)*.75; a *= .75+.25*sin(vU.x*300.-uTime*3.); vec3 c = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn); gl_FragColor = vec4(c*a, 1.); }` });
+  fragmentShader: `uniform float uTime, uWarn; varying vec2 vU; void main(){ float a = pow(1.-vU.y, 2.2)*.4; a *= .75+.25*sin(vU.x*300.-uTime*3.); vec3 c = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn); gl_FragColor = vec4(c*a, 1.); }` });
 const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.2, 160, 1, true), wallMat); wall.position.y = 1.1; scene.add(wall);
 
 // ---- snakes: a lit neon tube each, built fresh from the body points every frame ----
@@ -59,10 +60,10 @@ const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade; varying v
   void main(){
     float f = 1.-abs(dot(normalize(vN), normalize(vV)));
     float stripe = smoothstep(.35,.65,.5+.5*sin(vU*1.3 - uTime*(2.5+uBoost*14.)));
-    vec3 c = uCol*(.6+.25*stripe+uBoost*.25);
-    c += vec3(1.)*pow(1.-f,3.)*(.38+.2*stripe);
-    c += uCol*pow(f,2.)*.9;
-    c += vec3(1.)*pow(max(vW.y,0.),12.)*.25;
+    vec3 c = uCol*(.42+.16*stripe+uBoost*.2);
+    c += vec3(1.)*pow(1.-f,3.)*(.14+.08*stripe);
+    c += uCol*pow(f,2.)*.55;
+    c += vec3(1.)*pow(max(vW.y,0.),12.)*.12;
     gl_FragColor = vec4(c*uFade, 1.);
   }`;
 function tubeIndex() { const idx = []; for (let i = 0; i < MAXPT - 1; i++) for (let k = 0; k < RING; k++) { const a = i*RING + k, b = i*RING + (k + 1)%RING, c = a + RING, d = b + RING; idx.push(a, b, c, b, d, c); } return idx; }
@@ -101,7 +102,7 @@ const pointVS = `attribute float size; attribute vec3 color; varying vec3 vC; un
   void main(){ vC = color; vec4 mv = modelViewMatrix*vec4(position,1.); gl_PointSize = size*uScale/-mv.z; gl_Position = projectionMatrix*mv; }`;
 const SCALE = { value: 1 };
 const glowMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: SCALE },
-  vertexShader: pointVS, fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float a = exp(-dot(p,p)*18.)*.32; gl_FragColor = vec4(vC*a,1.); }` });
+  vertexShader: pointVS, fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float a = exp(-dot(p,p)*18.)*.15; gl_FragColor = vec4(vC*a,1.); }` });
 const glow = new THREE.Points(glowG, glowMat); glow.frustumCulled = false; scene.add(glow);
 
 // food: a bright core inside a soft halo, each light breathing on its own beat
@@ -113,7 +114,7 @@ foodG.setAttribute('size', new THREE.BufferAttribute(new Float32Array(FOODN), 1)
 const foodMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: SCALE, uTime: U.time },
   vertexShader: `attribute float size; attribute vec3 color; varying vec3 vC; uniform float uScale, uTime;
     void main(){ vC = color; vec4 mv = modelViewMatrix*vec4(position,1.); float b = .85+.15*sin(uTime*3.+position.x*1.7+position.z*1.3); gl_PointSize = size*b*uScale/-mv.z; gl_Position = projectionMatrix*mv; }`,
-  fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float d = length(p); float core = smoothstep(.13,.07,d); float a = exp(-d*d*22.)*.75; gl_FragColor = vec4(mix(vC*a, vec3(1.), core*.8),1.); }` });
+  fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float d = length(p); float core = smoothstep(.12,.06,d); float a = exp(-d*d*26.)*.45; gl_FragColor = vec4(mix(vC*a, vC*.6+.35, core*.7),1.); }` });
 const foodPts = new THREE.Points(foodG, foodMat); foodPts.frustumCulled = false; scene.add(foodPts);
 
 // sparks: bursts when a snake dies, a trail when one dashes
@@ -123,7 +124,7 @@ spG.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SPN*3), 
 spG.setAttribute('color', new THREE.BufferAttribute(new Float32Array(SPN*3), 3).setUsage(THREE.DynamicDrawUsage));
 spG.setAttribute('size', new THREE.BufferAttribute(new Float32Array(SPN), 1).setUsage(THREE.DynamicDrawUsage));
 const spMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: SCALE },
-  vertexShader: pointVS, fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float d = length(p); float a = smoothstep(.5,.0,d); gl_FragColor = vec4(vC*a*a*1.4,1.); }` });
+  vertexShader: pointVS, fragmentShader: `varying vec3 vC; void main(){ vec2 p = gl_PointCoord-.5; float d = length(p); float a = smoothstep(.5,.0,d); gl_FragColor = vec4(vC*a*a*.9,1.); }` });
 const spPts = new THREE.Points(spG, spMat); spPts.frustumCulled = false; scene.add(spPts);
 function spark(x, y, z, vx, vy, vz, col, life, size) { if (SP.length >= SPN) SP.shift(); SP.push({ x, y, z, vx, vy, vz, c: new THREE.Color(col), life, max: life, size }); }
 function burst(x, z, col, n) { for (let k = 0; k < n; k++) { const a = Math.random()*Math.PI*2, v = 3 + Math.random()*12, up = 2 + Math.random()*8; spark(x, 0.6, z, Math.cos(a)*v, up, Math.sin(a)*v, col, 0.6 + Math.random()*0.8, 0.5 + Math.random()*0.9); } }
@@ -134,9 +135,10 @@ function beep(f, d, type, vol, slide) { try { AC = AC || new (window.AudioContex
 let eatT = 0;
 
 // ---- the game being shown --------------------------------------------------
-let MODE = 'demo', LS = null, M = G.mirror(), snapAt = 0, ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
+let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
+let MODE = 'demo', LS = null, M = G.mirror(), ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
 function applySnap(o) {
-  const evs = G.apply(M, o); snapAt = performance.now();
+  const evs = G.apply(M, o); curTick = o.tm;
   for (const e of evs) onEvent(e);
   if (M.ph === 'over' && MODE !== 'demo' && !overShown) { overShown = true; setTimeout(showOver, 1300); }
   if (M.ph === 'play' && o.full && o.tm <= 0) { overShown = false; show(null); $('hud').classList.toggle('on', MODE !== 'demo'); }
@@ -160,49 +162,60 @@ function onEvent(e) {
 
 // ---- drawing a frame -------------------------------------------------------
 const tmpC = new THREE.Color();
-function buildTube(v, s, hx, hz, r, fade) {
+const PX = new Float32Array(MAXPT), PZ = new Float32Array(MAXPT), PU = new Float32Array(MAXPT);
+// the body from the drawn head back along the laid points, cut at exactly its length so the tail glides instead of hopping
+function buildTube(v, s, hx, hz, L, r) {
   const P = v.g.attributes.position.array, N = v.g.attributes.normal.array, A = v.g.attributes.aU.array;
-  const fx = Math.cos(s.a), fz = Math.sin(s.a);
-  const pts = [[hx, hz]];
-  for (const p of s.tr) { if ((p[0] - hx)*fx + (p[1] - hz)*fz > -0.1 && pts.length === 1) continue; pts.push(p); if (pts.length >= MAXPT) break; }
-  const n = pts.length, tailFrom = Math.max(4, Math.floor(n*0.7));
+  const fx = Math.cos(s.a), fz = Math.sin(s.a), tr = s.tr, want = L*G.SEG;
+  let n = 1, cum = 0, k = 0; PX[0] = hx; PZ[0] = hz;
+  while (k < tr.length && (tr[k][0] - hx)*fx + (tr[k][1] - hz)*fz > -0.05) k++;   // points the drawn head has not reached yet
+  PU[0] = ((s.n || 0) - k + 1)*G.SEG + (k < tr.length ? Math.hypot(tr[k][0] - hx, tr[k][1] - hz) : 0);
+  for (; k < tr.length && n < MAXPT; k++) {
+    const x = tr[k][0], z = tr[k][1], d = Math.hypot(x - PX[n - 1], z - PZ[n - 1]);
+    if (cum + d >= want) { const f = d > 0 ? (want - cum)/d : 0; PX[n] = PX[n - 1] + (x - PX[n - 1])*f; PZ[n] = PZ[n - 1] + (z - PZ[n - 1])*f; PU[n] = PU[n - 1] - d*f; cum = want; n++; break; }
+    cum += d; PX[n] = x; PZ[n] = z; PU[n] = ((s.n || 0) - k)*G.SEG; n++;
+  }
+  const total = Math.max(cum, 0.01), cy = r*0.95; let run = 0;
   for (let i = 0; i < n; i++) {
-    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)]; let tx = a[0] - b[0], tz = a[1] - b[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    const sx = -tz, sz = tx, rr = r*(i < tailFrom ? 1 : 0.3 + 0.7*(n - 1 - i)/Math.max(1, n - 1 - tailFrom)), cy = r*0.95, p = pts[i];
-    for (let k = 0; k < RING; k++) { const th = k/RING*Math.PI*2, c = Math.cos(th), sn = Math.sin(th), nx = sx*c, ny = sn, nz = sz*c, o = (i*RING + k)*3;
-      P[o] = p[0] + nx*rr; P[o + 1] = cy + ny*rr; P[o + 2] = p[1] + nz*rr; N[o] = nx; N[o + 1] = ny; N[o + 2] = nz; A[i*RING + k] = i*0.5; }
+    if (i) run += Math.hypot(PX[i] - PX[i - 1], PZ[i] - PZ[i - 1]);
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = PX[a] - PX[b], tz = PZ[a] - PZ[b]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    const f = run/total, rr = r*(f < 0.65 ? 1 : 0.28 + 0.72*(1 - f)/0.35), sx = -tz, sz = tx;
+    for (let q = 0; q < RING; q++) { const c = COS[q], sn = SIN[q], nx = sx*c, nz = sz*c, o = (i*RING + q)*3;
+      P[o] = PX[i] + nx*rr; P[o + 1] = cy + sn*rr; P[o + 2] = PZ[i] + nz*rr; N[o] = nx; N[o + 1] = sn; N[o + 2] = nz; A[i*RING + q] = PU[i]; }
   }
   v.g.setDrawRange(0, Math.max(0, n - 1)*RING*6);
   v.g.attributes.position.needsUpdate = v.g.attributes.normal.needsUpdate = v.g.attributes.aU.needsUpdate = true;
-  v.g.attributes.position.updateRange = undefined;
-  return pts;
+  return n;
 }
+const COS = Array.from({ length: RING }, (_, q) => Math.cos(q/RING*Math.PI*2)), SIN = Array.from({ length: RING }, (_, q) => Math.sin(q/RING*Math.PI*2));
 let gi = 0; const GP = glowG.attributes.position.array, GC = glowG.attributes.color.array, GS = glowG.attributes.size.array;
 function glowAt(x, y, z, col, size) { if (gi >= GLOWN) return; GP[gi*3] = x; GP[gi*3 + 1] = y; GP[gi*3 + 2] = z; GC[gi*3] = col.r; GC[gi*3 + 1] = col.g; GC[gi*3 + 2] = col.b; GS[gi] = size; gi++; }
 
 const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); let camH = 30, follow = -1;
 function drawWorld(dt) {
-  const t = performance.now(), al = Math.min(1, (t - snapAt)/50);
+  const al = ALPHA;
   floorMat.uniforms.uR.value = M.R; wall.scale.set(M.R, 1, M.R);
   const warn = M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
   gi = 0; const heads = floorMat.uniforms.uHeads.value, hcols = floorMat.uniforms.uCols.value;
   for (let i = 0; i < HEADS; i++) heads[i].z = 0;
+  HEAD.ok = false;
   M.sn.forEach((s, i) => {
     const v = vis(i), col = G.COLORS[s.col % G.COLORS.length]; v.mat.uniforms.uCol.value.setHex(col);
     const show = s.alive || false; v.body.visible = v.head.visible = show; for (const e of v.eyes) e[0].visible = e[1].visible = show;
     if (v.tag) v.tag.visible = false;
     if (!show) return;
-    const hx = s.px + (s.x - s.px)*al, hz = s.pz + (s.z - s.pz)*al, r = G.radius(s.L);
+    const hx = s.px + (s.x - s.px)*al, hz = s.pz + (s.z - s.pz)*al, Lr = s.pL + (s.L - s.pL)*al, r = G.radius(Lr);
+    if (s.id === ME) { HEAD.x = hx; HEAD.z = hz; HEAD.ok = true; }
     v.mat.uniforms.uBoost.value += ((s.boosting ? 1 : 0) - v.mat.uniforms.uBoost.value)*Math.min(1, dt*8);
-    const pts = buildTube(v, s, hx, hz, r);
+    const np = buildTube(v, s, hx, hz, Lr, r);
     const hr = r*1.18; v.head.position.set(hx, r*0.95, hz); v.head.scale.setScalar(hr);
     const fx = Math.cos(s.a), fz = Math.sin(s.a), sx = -fz, sz = fx;
     v.eyes.forEach(([w, p], k) => { const side = k ? 1 : -1, ex = hx + fx*hr*0.45 + sx*side*hr*0.5, ez = hz + fz*hr*0.45 + sz*side*hr*0.5, ey = r*0.95 + hr*0.55;
       w.position.set(ex, ey, ez); w.scale.setScalar(hr*0.34); p.position.set(ex + fx*hr*0.17, ey + hr*0.08, ez + fz*hr*0.17); p.scale.setScalar(hr*0.19); });
     tmpC.setHex(col);
-    for (let k = 0; k < pts.length; k += 3) glowAt(pts[k][0], 0.3, pts[k][1], tmpC, r*9*(1 - k/pts.length*0.5));
-    glowAt(hx, 0.5, hz, tmpC, r*16);
-    if (s.boosting && Math.random() < 0.7) { const tp = pts[pts.length - 1]; spark(tp[0], r, tp[1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45); }
+    for (let k = 2; k < np; k += 4) glowAt(PX[k], 0.3, PZ[k], tmpC, r*7*(1 - k/np*0.5));
+    glowAt(hx, 0.5, hz, tmpC, r*9);
+    if (s.boosting && Math.random() < 0.6) spark(PX[np - 1], r, PZ[np - 1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45);
     if (i < HEADS) { heads[i].set(hx, hz, s.boosting ? 1.4 : 1); hcols[i].setHex(col); }
     if (MODE !== 'demo' && s.id !== ME) { if (!v.tag || v.tagName !== s.name) { if (v.tag) scene.remove(v.tag); v.tag = label(s.name, col); v.tagName = s.name; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + 2.2, hz); }
   });
@@ -224,7 +237,7 @@ function drawWorld(dt) {
   // the camera follows you; once you are out, whoever is longest
   const me = meS(); let tgt = me && me.alive ? me : null;
   if (!tgt) { const alive = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L); tgt = alive.find((s) => s.i === follow) || alive[0]; }
-  if (tgt) { follow = tgt.i; const hx = tgt.px + (tgt.x - tgt.px)*al, hz = tgt.pz + (tgt.z - tgt.pz)*al; camT.lerp(new THREE.Vector3(hx, 0, hz), 1 - Math.exp(-dt*(MODE === 'demo' ? 1.5 : 9)));
+  if (tgt) { follow = tgt.i; const hx = tgt.px + (tgt.x - tgt.px)*al, hz = tgt.pz + (tgt.z - tgt.pz)*al; const kk = 1 - Math.exp(-dt*(MODE === 'demo' ? 1.5 : 10)); camT.x += (hx - camT.x)*kk; camT.z += (hz - camT.z)*kk;
     const want = (MODE === 'demo' ? 40 : 21) + Math.min(20, tgt.L*0.06); camH += (want - camH)*Math.min(1, dt*2); }
   camP.set(camT.x, camH, camT.z + camH*0.5); cam.position.copy(camP); cam.lookAt(camT.x, 0, camT.z - 2);
   SCALE.value = innerHeight*DPR/(2*Math.tan(cam.fov*Math.PI/360));
@@ -263,46 +276,61 @@ function showOver() {
 }
 
 // ---- controls: drag anywhere to steer, a second finger or the button to dash ----
-let aim = null, boost = false, steerId = null, boostId = null, ox = 0, oy = 0, keyTurn = 0, sentA = 99, sentB = false, sentT = 0;
-const stick = $('stick'), knob = stick.firstElementChild;
+// Directions are measured on the floor, not on the glass: the camera looks down at an angle.
+let mouseFrom = null, keyT = 0, keyCombo = '', keyHold = 0;
+let aim = null, boost = false, steerId = null, boostId = null, ox = 0, oy = 0, sentA = 99, sentB = false, sentT = 0, src = null, mouse = null;
+const stick = $('stick'), knob = stick.firstElementChild, ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitP = new THREE.Vector3();
+const HEAD = { x: 0, z: 0, ok: false };
+function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1); ray.setFromCamera(ndc, cam); return ray.ray.intersectPlane(plane, hitP) ? [hitP.x, hitP.z] : null; }
 function onDown(e) {
-  if (MODE === 'demo' || e.target.closest('button') || e.target.id === 'boost') return;
-  if (e.pointerType === 'mouse') { boost = true; aimFromMouse(e); return; }
-  if (steerId === null) { steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
+  if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
+  if (e.pointerType === 'mouse') { src = 'mouse'; mouse = [e.clientX, e.clientY]; if (e.button === 0) boost = true; return; }
+  if (steerId === null) { src = 'touch'; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
   else if (boostId === null) { boostId = e.pointerId; boost = true; }
 }
-function aimFromMouse(e) { const dx = e.clientX - innerWidth/2, dy = e.clientY - innerHeight/2; if (dx*dx + dy*dy > 100) aim = Math.atan2(dy, dx); }
 function onMove(e) {
   if (MODE === 'demo') return;
-  if (e.pointerType === 'mouse') { aimFromMouse(e); return; }
+  if (e.pointerType === 'mouse') {
+    // after the keys, the mouse takes over only when really moved, not when a palm brushes the touchpad
+    if (src === 'key') { if (!mouseFrom) mouseFrom = [e.clientX, e.clientY]; if (Math.hypot(e.clientX - mouseFrom[0], e.clientY - mouseFrom[1]) < 120 || performance.now() - keyT < 1500) return; }
+    src = 'mouse'; mouseFrom = null; mouse = [e.clientX, e.clientY]; return; }
   if (e.pointerId !== steerId) return; const dx = e.clientX - ox, dy = e.clientY - oy, d = Math.hypot(dx, dy);
-  if (d > 8) aim = Math.atan2(dy, dx); const k = Math.min(d, 36)/(d || 1); knob.style.transform = 'translate(' + dx*k + 'px,' + dy*k + 'px)';
+  if (d > 8) { const a = ground(ox, oy), b = ground(e.clientX, e.clientY); aim = a && b ? Math.atan2(b[1] - a[1], b[0] - a[0]) : Math.atan2(dy, dx); }
+  const k = Math.min(d, 36)/(d || 1); knob.style.transform = 'translate(' + dx*k + 'px,' + dy*k + 'px)';
 }
 function onUp(e) {
-  if (e.pointerType === 'mouse') { boost = false; return; }
+  if (e.pointerType === 'mouse') { if (e.button === 0) boost = false; return; }
   if (e.pointerId === steerId) { steerId = null; stick.style.display = 'none'; }
   if (e.pointerId === boostId) { boostId = null; boost = false; }
 }
 addEventListener('pointerdown', onDown); addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
+addEventListener('blur', () => { boost = false; for (const k in keys) keys[k] = false; });
 const bb = $('boost'); let btnBoost = false;
 bb.addEventListener('pointerdown', (e) => { e.stopPropagation(); btnBoost = true; bb.classList.add('on'); haptic('light'); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) bb.addEventListener(ev, () => { btnBoost = false; bb.classList.remove('on'); });
 const keys = {};
-addEventListener('keydown', (e) => { keys[e.code] = true; if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keydown', (e) => { keys[e.code] = true; if (/^(Space|Arrow)/.test(e.code)) e.preventDefault(); });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 function controls(dt) {
   if (MODE === 'demo') return; const me = meS(); if (!me || !me.alive) return;
-  const kt = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
-  if (kt) aim = (aim === null ? me.a : aim) + kt*G.TURN*dt*1.05;
-  const b = boost || btnBoost || !!keys.Space || !!keys.ArrowUp || !!keys.KeyW, a = aim === null ? me.a : aim, t = performance.now();
-  if ((Math.abs(a - sentA) > 0.03 || b !== sentB) && t - sentT > 45) { sentA = a; sentB = b; sentT = t;
+  // WASD / arrows point the way on screen (W up, D right, two keys a diagonal); let go and it keeps its course
+  const kx = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0), kz = (keys.ArrowDown || keys.KeyS ? 1 : 0) - (keys.ArrowUp || keys.KeyW ? 1 : 0);
+  const combo = kx + ',' + kz;
+  if (kx || kz) { keyT = performance.now(); mouseFrom = null; src = 'key';
+    // letting go of a diagonal is never quite at once: a lone key left over counts only after a moment
+    if (combo !== keyCombo) { keyHold += dt; if (keyHold > 0.09 || (kx && kz) || keyCombo === '0,0') { keyCombo = combo; keyHold = 0; } } else keyHold = 0;
+    const [cx, cz] = keyCombo.split(',').map(Number); if (cx || cz) aim = Math.atan2(cz, cx); }
+  else { keyCombo = '0,0'; keyHold = 0; }
+  if (!(kx || kz) && src === 'mouse' && mouse && HEAD.ok) { const p = ground(mouse[0], mouse[1]); if (p && Math.hypot(p[0] - HEAD.x, p[1] - HEAD.z) > 0.8) aim = Math.atan2(p[1] - HEAD.z, p[0] - HEAD.x); }
+  const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight, a = aim === null ? me.a : aim, t = performance.now();
+  if ((Math.abs(a - sentA) > 0.03 || b !== sentB) && t - sentT > 40) { sentA = a; sentB = b; sentT = t;
     const c = { a: Math.round(a*1000)/1000, b: b ? 1 : 0 };
     if (MODE === 'solo' && LS) G.input(LS, 'me', c); else if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'in', c })); }
 }
 
 // ---- rooms -------------------------------------------------------------
 function netJoin(room) {
-  netLeave(); LS = null; MODE = 'net'; M = G.mirror(); overShown = false;
+  netLeave(); LS = null; MODE = 'net'; M = G.mirror(); overShown = false; Q.length = 0; lastTick = playTick = curTick = 0;
   const N = NET = { room, ws: null, me: null, players: [], tries: 0, link: 'https://t.me/' + BOT + '?startapp=r_' + room }; show('lobby'); $('lWho').textContent = 'Подключаюсь…'; $('lList').innerHTML = '';
   const open = () => { if (NET !== N) return; const ws = N.ws = new WebSocket((zt().ws || API.replace('https:', 'wss:')) + '/ws?room=' + room + '&init=' + encodeURIComponent(initStr()));
     ws.onopen = () => { N.tries = 0; };
@@ -319,7 +347,20 @@ function netMsg(N, m) {
     $('lWho').textContent = m.players.length < 2 ? 'Пока ты один. Позови друзей — или начинай с ботами.' : 'В комнате ' + m.players.length + ' из ' + G.MAXS + '. Свободные места займут боты. Начать может любой.';
     if (m.ph === 'play' && !$('lobby').classList.contains('hidden') && M.ready) { show(null); $('hud').classList.add('on'); }
     if (m.ph !== 'play' && $('over').classList.contains('hidden')) { show('lobby'); $('hud').classList.remove('on'); } }
-  else if (m.t === 's') { applySnap(m.s); if (m.s.full && M.ph === 'play' && $('over').classList.contains('hidden')) { show(null); $('hud').classList.add('on'); } }
+  else if (m.t === 's') { netSnap(m.s); if (m.s.full && M.ph === 'play' && $('over').classList.contains('hidden')) { show(null); $('hud').classList.add('on'); } }
+}
+// phones get ticks unevenly over the air; play them back a couple of ticks late, at an even pace
+function netSnap(s) {
+  if (s.full && (!M.ready || s.tm < lastTick - 5)) { Q.length = 0; applySnap(s); playTick = lastTick = s.tm; ALPHA = 1; return; }
+  if (!M.ready) return; Q.push(s); lastTick = s.tm;
+}
+function netPlay(dt) {
+  if (MODE !== 'net' || !M.ready) return;
+  const target = lastTick - 2.2;
+  if (Math.abs(target - playTick) > 10) playTick = target; else playTick += dt*20*(1 + Math.max(-0.12, Math.min(0.12, (target - playTick)*0.08)));
+  if (playTick > lastTick) playTick = lastTick;
+  while (Q.length && Q[0].tm <= playTick) applySnap(Q.shift());
+  ALPHA = Math.max(0, Math.min(1, playTick - curTick));
 }
 function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); try { N.ws && N.ws.close(); } catch (e) {} }
 async function netNew() {
@@ -332,7 +373,7 @@ function netInvite() { if (!NET) return; const N = NET;
   fetch((zt().api || API) + '/share', { method: 'POST', body: JSON.stringify({ init: initStr(), room: N.room }) }).then((r) => r.json()).then((r) => { if (r && r.ok) { try { TG.shareMessage(r.id); } catch (e) { old(); } } else old(); }).catch(old); }
 function goHome() { netLeave(); MODE = 'demo'; ME = null; $('hud').classList.remove('on'); show('home'); newLocal(false); }
 
-$('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
+$('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; sentA = 99; src = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
 $('goNet').onclick = netNew;
 $('goHelp').onclick = () => show('help'); $('helpBack').onclick = () => show('home');
 $('lStart').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); };
@@ -344,12 +385,12 @@ let last = performance.now(), slow = 0, fast = 0, fpsT = 0, frames = 0, msSum = 
 function loop(t) {
   requestAnimationFrame(loop); const dt = Math.min(0.1, (t - last)/1000); last = t; U.time.value = t/1000;
   const t0 = performance.now();
-  if (LS) { acc += dt; let n = 0; while (acc >= G.TICK && n++ < 5) { G.step(LS); applySnap(G.snap(LS, false)); acc -= G.TICK; }
+  if (LS) { if (LS.ph === 'play') { acc += dt; let n = 0; while (acc >= G.TICK && n++ < 5) { G.step(LS); applySnap(G.snap(LS, false)); acc -= G.TICK; } if (acc > G.TICK) acc = 0; ALPHA = acc/G.TICK; } else ALPHA = 1;
     if (MODE === 'demo' && LS.ph === 'over') { if (!LS.endAt) LS.endAt = t; else if (t - LS.endAt > 2500) newLocal(false); } }
-  controls(dt); drawWorld(dt); hud(dt); R.render(scene, cam);
+  netPlay(dt); controls(dt); drawWorld(dt); hud(dt); R.render(scene, cam);
   // too slow for this phone? fewer pixels. Plenty of room? more.
   msSum += performance.now() - t0; frames++; fpsT += dt;
-  if (fpsT > 2) { const fps = frames/fpsT; if (fps < 45 && DPR > 1) { DPR = Math.max(1, DPR - 0.25); R.setPixelRatio(DPR); resize(); } else if (fps > 58 && DPR < Math.min(2, devicePixelRatio || 1) && msSum/frames < 6) { DPR = Math.min(2, DPR + 0.25); R.setPixelRatio(DPR); resize(); } window.__fps = fps; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; }
+  if (fpsT > 1.5) { const fps = frames/fpsT; if (fps < 54 && DPR > 1) { DPR = Math.max(1, DPR - 0.25); R.setPixelRatio(DPR); resize(); } else if (fps > 58.5 && DPR < DPRMAX && msSum/frames < 5) { DPR = Math.min(DPRMAX, DPR + 0.25); R.setPixelRatio(DPR); resize(); } window.__fps = fps; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; }
 }
 
 // start: the menu over a live arena of bots, or straight into a room from a link

@@ -24,7 +24,7 @@ export function addHead(s, x, z) {
   if (!t.length) { t.push([x, z]); return; }
   for (let n = 0; n < 8; n++) {
     const p = t[0], dx = x - p[0], dz = z - p[1], d = Math.hypot(dx, dz); if (d < SEG) break;
-    t.unshift([q(p[0] + dx/d*SEG), q(p[1] + dz/d*SEG)]);
+    t.unshift([q(p[0] + dx/d*SEG), q(p[1] + dz/d*SEG)]); s.n = (s.n || 0) + 1;   // n: points ever laid, so stripes can stay put on the body
   }
   const keep = Math.max(2, Math.ceil(s.L)); if (t.length > keep) t.length = keep;
 }
@@ -93,8 +93,8 @@ function think(S, s, g) {
 }
 
 export function step(S) {
-  if (S.ph !== 'play') return;
   S.ev = []; S.fa = []; S.fr = [];
+  if (S.ph !== 'play') return;
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
   S.R = q(arenaR(S.tm));
   let g = grid(S);
@@ -145,7 +145,7 @@ export function snap(S, full) {
 // a phone's copy of the world, kept up to date from snapshots
 export function mirror() { return { tm: 0, R: R0, ph: 'play', sn: [], food: new Map(), ready: false, res: null }; }
 export function apply(M, o) {
-  if (o.full) { M.ready = true; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, px: 0, pz: 0 }));
+  if (o.full) { M.ready = true; const old = M.sn; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, pL: L0, n: old[i] && old[i].id === w[0] ? old[i].n || 0 : 0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, px: 0, pz: 0 }));
     M.food = new Map(); for (const f of o.food) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]); }
   if (!M.ready) return [];
   M.tm = o.tm/20; M.R = o.R; if (o.ph) M.ph = o.ph; if (o.res) M.res = o.res;
@@ -153,7 +153,7 @@ export function apply(M, o) {
     const x = h[1]/100, z = h[2]/100;
     // the server grew the body with last tick's length, so must we
     if (o.full) { s.x = x; s.z = z; s.px = x; s.pz = z; } else if (s.alive) addHead(s, x, z);
-    s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.alive = !!(h[5] & 1); }
+    s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.alive = !!(h[5] & 1); }
   if (o.fr) for (const id of o.fr) M.food.delete(id);
   if (o.fa) for (const f of o.fa) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]);
   return o.ev || [];
