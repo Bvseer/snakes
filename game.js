@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.12';
+import * as G from './sim.js?v=1.13';
 
-export const VERSION = '1.12';
+export const VERSION = '1.13';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -303,8 +303,7 @@ function hud(dt) {
   hudT -= dt; if (hudT > 0 || MODE === 'demo') return; hudT = 0.2;
   if (M.tm <= 0 && M.ph === 'play') { const n = Math.ceil(-M.tm); if (n !== lastCount && n >= 1) { lastCount = n; big(String(n), 700); beep(440, 0.12, 'square', 0.06); } }
   else if (lastCount !== 0 && M.ph === 'play') { lastCount = 0; big('ВПЕРЁД!', 800); beep(880, 0.25, 'square', 0.07); haptic('medium'); }
-  const left = Math.max(0, G.ROUND - Math.max(0, M.tm)); $('hTime').textContent = Math.floor(left/60) + ':' + String(Math.floor(left%60)).padStart(2, '0');
-  $('hTime').style.color = left < 15 ? '#ff6b8b' : '';
+
   const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + ' / ' + M.sn.length;
   const me = meS(); $('hLen').textContent = me ? (me.alive ? '📏 ' + Math.floor(me.L) : '👀 смотришь') : '';
   const rows = M.sn.slice().sort((a, b) => (b.alive - a.alive) || b.L - a.L);

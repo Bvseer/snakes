@@ -140,7 +140,8 @@ export function step(S) {
     if (eaten) S.fr.push(f[0]); else keep.push(f); }
   S.food = keep; topUpFood(S);
   const alive = S.sn.filter((s) => s.alive), humansAlive = alive.filter((s) => !s.bot).length;
-  if (S.tm >= ROUND || alive.length <= 1 || (S.humans > 0 && humansAlive === 0)) end(S);
+  // no clock: the round goes on until one snake is left (or no people are left in it)
+  if (alive.length <= 1 || (S.humans > 0 && humansAlive === 0)) end(S);
 }
 
 function end(S) {

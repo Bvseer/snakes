@@ -319,7 +319,7 @@ function step(S) {
   S.food = keep;
   topUpFood(S);
   const alive = S.sn.filter((s) => s.alive), humansAlive = alive.filter((s) => !s.bot).length;
-  if (S.tm >= ROUND || alive.length <= 1 || S.humans > 0 && humansAlive === 0) end(S);
+  if (alive.length <= 1 || S.humans > 0 && humansAlive === 0) end(S);
 }
 __name(step, "step");
 function end(S) {
