@@ -158,6 +158,7 @@ export function apply(M, o) {
     // the server grew the body with last tick's length, so must we
     if (o.full) { s.x = x; s.z = z; s.px = x; s.pz = z; } else if (s.alive) addHead(s, x, z);
     s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.alive = !!(h[5] & 1); }
+  if (o.fr || o.fa || o.full) M.fv = (M.fv || 0) + 1;
   if (o.fr) for (const id of o.fr) M.food.delete(id);
   if (o.fa) for (const f of o.fa) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]);
   return o.ev || [];
