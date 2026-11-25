@@ -277,7 +277,7 @@ function showOver() {
 
 // ---- controls: drag anywhere to steer, a second finger or the button to dash ----
 // Directions are measured on the floor, not on the glass: the camera looks down at an angle.
-let mouseFrom = null, keyT = 0, keyCombo = '', keyHold = 0;
+let sentR = 0;
 let aim = null, boost = false, steerId = null, boostId = null, ox = 0, oy = 0, sentA = 99, sentB = false, sentT = 0, src = null, mouse = null;
 const stick = $('stick'), knob = stick.firstElementChild, ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitP = new THREE.Vector3();
 const HEAD = { x: 0, z: 0, ok: false };
@@ -285,7 +285,7 @@ function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1);
 function onDown(e) {
   if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
   if (e.pointerType === 'mouse') return;   // on a computer: keys only, the mouse never steers
-  if (steerId === null) { src = 'touch'; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
+  if (steerId === null) { src = 'touch'; sentR = 0; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
   else if (boostId === null) { boostId = e.pointerId; boost = true; }
 }
 function onMove(e) {
@@ -310,18 +310,15 @@ addEventListener('keydown', (e) => { keys[e.code] = true; if (/^(Space|Arrow)/.t
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 function controls(dt) {
   if (MODE === 'demo') return; const me = meS(); if (!me || !me.alive) return;
-  // WASD / arrows point the way on screen (W up, D right, two keys a diagonal); let go and it keeps its course
-  const kx = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0), kz = (keys.ArrowDown || keys.KeyS ? 1 : 0) - (keys.ArrowUp || keys.KeyW ? 1 : 0);
-  const combo = kx + ',' + kz;
-  if (kx || kz) { keyT = performance.now(); mouseFrom = null; src = 'key';
-    // letting go of a diagonal is never quite at once: a lone key left over counts only after a moment
-    if (combo !== keyCombo) { keyHold += dt; if (keyHold > 0.09 || (kx && kz) || keyCombo === '0,0') { keyCombo = combo; keyHold = 0; } } else keyHold = 0;
-    const [cx, cz] = keyCombo.split(',').map(Number); if (cx || cz) aim = Math.atan2(cz, cx); }
-  else { keyCombo = '0,0'; keyHold = 0; }
-  const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight, a = aim === null ? me.a : aim, t = performance.now();
-  if ((Math.abs(a - sentA) > 0.03 || b !== sentB) && t - sentT > 40) { sentA = a; sentB = b; sentT = t;
-    const c = { a: Math.round(a*1000)/1000, b: b ? 1 : 0 };
-    if (MODE === 'solo' && LS) G.input(LS, 'me', c); else if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'in', c })); }
+  // keys: turn only while held, straight the moment you let go. Finger: point the way.
+  const r = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+  if (r) src = 'key';
+  const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight || !!keys.KeyW || !!keys.ArrowUp, t = performance.now();
+  let c = null;
+  if (src === 'key') { if (r !== sentR || b !== sentB) { c = { r, b: b ? 1 : 0 }; sentR = r; } }
+  else { const a = aim === null ? me.a : aim; if ((Math.abs(a - sentA) > 0.03 && t - sentT > 40) || b !== sentB) { c = { a: Math.round(a*1000)/1000, b: b ? 1 : 0 }; sentA = a; } }
+  if (!c) return; sentB = b; sentT = t;
+  if (MODE === 'solo' && LS) G.input(LS, 'me', c); else if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'in', c }));
 }
 
 // ---- rooms -------------------------------------------------------------
@@ -352,7 +349,7 @@ function netSnap(s) {
 }
 function netPlay(dt) {
   if (MODE !== 'net' || !M.ready) return;
-  const target = lastTick - 2.2;
+  const target = lastTick - 1.4;
   if (Math.abs(target - playTick) > 10) playTick = target; else playTick += dt*20*(1 + Math.max(-0.12, Math.min(0.12, (target - playTick)*0.08)));
   if (playTick > lastTick) playTick = lastTick;
   while (Q.length && Q[0].tm <= playTick) applySnap(Q.shift());
@@ -369,7 +366,7 @@ function netInvite() { if (!NET) return; const N = NET;
   fetch((zt().api || API) + '/share', { method: 'POST', body: JSON.stringify({ init: initStr(), room: N.room }) }).then((r) => r.json()).then((r) => { if (r && r.ok) { try { TG.shareMessage(r.id); } catch (e) { old(); } } else old(); }).catch(old); }
 function goHome() { netLeave(); MODE = 'demo'; ME = null; $('hud').classList.remove('on'); show('home'); newLocal(false); }
 
-$('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; sentA = 99; src = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
+$('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; sentA = 99; sentR = 0; src = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
 $('goNet').onclick = netNew;
 $('goHelp').onclick = () => show('help'); $('helpBack').onclick = () => show('home');
 $('lStart').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); };

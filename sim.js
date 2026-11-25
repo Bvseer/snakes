@@ -40,7 +40,10 @@ export function addSnake(S, id, name, bot) {
   if (!bot) S.humans++; S.sn.push(s); return s;
 }
 export function fillBots(S) { let k = 0; const from = Math.floor(S.rnd()*8); while (S.sn.length < MAXS) { addSnake(S, 'bot' + k, BOTS[(from + k) % 8], true); k++; } }
-export function input(S, id, c) { const s = S.sn.find((v) => v.id === String(id)); if (!s || !s.alive || !c) return; if (Number.isFinite(c.a)) s.ta = wrap(c.a); s.boost = !!c.b; }
+// two ways to steer: a heading to turn toward (finger), or "keep turning this way while the key is held" (keys)
+export function input(S, id, c) { const s = S.sn.find((v) => v.id === String(id)); if (!s || !s.alive || !c) return;
+  if (c.r === -1 || c.r === 0 || c.r === 1) { s.turn = c.r; if (!c.r) s.ta = s.a; } else if (Number.isFinite(c.a)) { s.turn = 0; s.ta = wrap(c.a); }
+  s.boost = !!c.b; }
 export function removeHuman(S, id) { const s = S.sn.find((v) => v.id === String(id)); if (s && s.alive) die(S, s, null); }
 
 function food(S, x, z, v) { const f = [S.fid++, q(x), q(z), v]; S.food.push(f); S.fa.push(f); return f; }
@@ -101,8 +104,9 @@ export function step(S) {
   for (const s of S.sn) if (s.alive && s.bot) think(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
   for (const s of S.sn) { if (!s.alive) continue;
-    const boost = s.boost && s.L > LMIN, turn = TURN*(boost ? 0.8 : 1)*TICK, d = wrap(s.ta - s.a);
-    s.a = wrap(s.a + Math.max(-turn, Math.min(turn, d)));
+    const boost = s.boost && s.L > LMIN, turn = TURN*(boost ? 0.8 : 1)*TICK;
+    if (s.turn) { s.a = wrap(s.a + s.turn*turn); s.ta = s.a; }
+    else { const d = wrap(s.ta - s.a); s.a = wrap(s.a + Math.max(-turn, Math.min(turn, d))); }
     const v = (boost ? VB : V)*TICK; addHead(s, q(s.x + Math.cos(s.a)*v), q(s.z + Math.sin(s.a)*v));
     if (boost) { s.L = q(s.L - 1.6*TICK); s.dropT += TICK; if (s.dropT > 0.35) { s.dropT = 0; const p = s.tr[s.tr.length - 1]; food(S, p[0], p[1], 0.5); } }
     s.boosting = boost;

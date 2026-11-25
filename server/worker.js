@@ -54,7 +54,7 @@ export class Room {
   }
   onMessage(ws, data) {
     const me = this.socks.get(ws); if (!me || typeof data !== 'string' || data.length > 300) return; me.seen = Date.now(); let m; try { m = JSON.parse(data); } catch (e) { return; }
-    if (m.t === 'in' && this.ph === 'play' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, b: !!m.c.b });
+    if (m.t === 'in' && this.ph === 'play' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
     else if (m.t === 'start' && this.ph !== 'play') this.start();
     else if (m.t === 'ping') this.send(ws, { t: 'pong' });
   }

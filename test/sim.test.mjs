@@ -17,3 +17,7 @@ for (let seed = 1; seed <= 5; seed++) {
   G.input(S, 'u1', { a: Math.atan2(me.z, me.x), b: 1 }); let n = 0; while (me.alive && n++ < 400) { G.input(S, 'u1', { a: Math.atan2(me.z, me.x), b: 1 }); G.step(S); }
   ok(!me.alive, 'hits the wall'); ok(S.ph === 'over', 'round over when the only human dies'); }
 console.log(fails ? fails + ' FAILED' : 'all ok');
+// keys: turning stops on the very tick the key is let go
+{ const S = G.newGame(3); S.tm = 0; const me = G.addSnake(S, 'k', 'K', false); G.fillBots(S);
+  const a0 = me.a; G.input(S, 'k', { r: 1 }); for (let i = 0; i < 5; i++) G.step(S); const a1 = me.a; G.input(S, 'k', { r: 0 }); G.step(S); G.step(S); G.step(S);
+  console.log('turn while held:', (a1 - a0).toFixed(2), 'after release:', (me.a - a1).toFixed(3)); if (Math.abs(me.a - a1) > 1e-9 || a1 - a0 < 0.8) { console.log('FAIL key turning'); process.exitCode = 1; } }
