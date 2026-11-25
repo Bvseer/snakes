@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.14';
+import * as G from './sim.js?v=1.15';
 
-export const VERSION = '1.14';
+export const VERSION = '1.15';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -35,7 +35,7 @@ const floorMat = new THREE.ShaderMaterial({
       vec3 ringC = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn);
       float g = line(vP, 10.)*.18 + (uLite > .5 ? line(vP, 2.)*.08 : 0.);
       vec3 c = vec3(.015,.02,.05) + mix(vec3(.25,.03,.06), vec3(0.,.55,.8), inside)*g*(inside*.9+.25) + vec3(.0,.02,.05)*inside;
-      c += ringC*exp(-abs(d-uR)*2.2)*(.5+.12*sin(uTime*4.));
+      float dr = d-uR; c += ringC*(smoothstep(.22,.0,abs(dr))*.9 + exp(-abs(dr)*3.5)*.22*(dr > 0. ? 1. : .5))*(.85+.15*sin(uTime*4.));
       c *= 1.-smoothstep(uR+8., uR+45., d)*.85;
       gl_FragColor = vec4(c,1.);
     }`,

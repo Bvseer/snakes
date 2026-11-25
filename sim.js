@@ -168,7 +168,7 @@ export function step(S) {
   // then only the one who did the ramming dies. Two snakes meeting head to head: the shorter one goes (both if equal).
   g = grid(S); const hits = new Map();
   for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L);
-    if (Math.hypot(s.x, s.z) > S.R - r) { hits.set(s, { o: null, k: 0 }); continue; }
+    if (Math.hypot(s.x, s.z) > S.R) { hits.set(s, { o: null, k: 0 }); continue; }   // the wall: only when the middle of the head crosses the line
     const o = hit(g, s.x, s.z, r, s, false); if (o) hits.set(s, { o, k: HIT.k }); }
   const FRONT = 2;
   for (const [s, h] of hits) { if (!s.alive) continue; const o = h.o, back = o && hits.get(o);
