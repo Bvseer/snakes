@@ -32,3 +32,12 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
 { const S = G.newGame(5); S.tm = 0; const A = G.addSnake(S, 'a', 'A', false), B = G.addSnake(S, 'b', 'B', false);
   A.tr = []; B.tr = []; for (let k = 30; k >= 0; k--) { G.addHead(A, -0.7 - k*G.SEG, 0); G.addHead(B, 0.7 + k*G.SEG, 0); } A.a = 0; A.ta = 0; B.a = Math.PI; B.ta = Math.PI; A.L = 40; B.L = 25;
   G.step(S); console.log('head to head: longer A', A.alive ? 'alive' : 'dead', '| shorter B', B.alive ? 'alive' : 'dead'); if (!A.alive || B.alive) { console.log('FAIL head rule'); process.exitCode = 1; } }
+// a snake dies: bots nearby race to its remains
+{ let came = 0, total = 0;
+  for (let seed = 20; seed < 30; seed++) { const S = G.newGame(seed); S.tm = 0; G.fillBots(S); for (let i = 0; i < 40; i++) G.step(S);
+    const v = S.sn.find((s) => s.alive), others = S.sn.filter((s) => s.alive && s !== v && Math.hypot(s.x - v.x, s.z - v.z) < 26);
+    if (!others.length) continue; const spot = [v.x, v.z], before = others.map((o) => Math.hypot(o.x - spot[0], o.z - spot[1]));
+    v.alive = false; v.L = 60; v.tr = v.tr.length ? v.tr : [[v.x, v.z]]; for (let k = 0; k < 30; k++) S.food.push([S.fid++, v.x + (k%6) - 3, v.z + Math.floor(k/6) - 2, 1.2, S.tm]);
+    for (let i = 0; i < 70; i++) G.step(S);
+    others.forEach((o, j) => { total++; if (Math.hypot(o.x - spot[0], o.z - spot[1]) < before[j] - 3 || o.L > 40) came++; }); }
+  console.log('bots that rushed to the remains:', came + '/' + total); if (came < total*0.6) { console.log('FAIL bots ignore corpses'); process.exitCode = 1; } }

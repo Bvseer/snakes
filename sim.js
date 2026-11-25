@@ -46,7 +46,7 @@ export function input(S, id, c) { const s = S.sn.find((v) => v.id === String(id)
   s.boost = !!c.b; }
 export function removeHuman(S, id) { const s = S.sn.find((v) => v.id === String(id)); if (s && s.alive) die(S, s, null); }
 
-function food(S, x, z, v) { const f = [S.fid++, q(x), q(z), v]; S.food.push(f); S.fa.push(f); return f; }
+function food(S, x, z, v, corpse) { const f = [S.fid++, q(x), q(z), v, corpse ? S.tm : -1]; S.food.push(f); S.fa.push(f); return f; }
 function topUpFood(S) {
   const want = 70 + 22*S.sn.filter((s) => s.alive).length;
   for (let n = 0; S.food.length < want && n < 12; n++) { const r = Math.sqrt(S.rnd())*(S.R - 3), a = S.rnd()*Math.PI*2; food(S, Math.cos(a)*r, Math.sin(a)*r, S.rnd() < 0.1 ? 2 : 0.7); }
@@ -56,7 +56,7 @@ function die(S, s, by) {
   s.alive = false; s.boost = false; s.place = S.sn.filter((v) => v.alive).length + 1; S.deaths++;
   if (by && by !== s) by.kills++;
   // the body turns into food: whoever is near gets fat
-  for (let k = 0; k < s.tr.length; k += 2) { const p = s.tr[k]; if (Math.hypot(p[0], p[1]) < S.R - 1) food(S, p[0] + (S.rnd() - 0.5)*0.8, p[1] + (S.rnd() - 0.5)*0.8, 1.2); }
+  for (let k = 0; k < s.tr.length; k += 2) { const p = s.tr[k]; if (Math.hypot(p[0], p[1]) < S.R - 1) food(S, p[0] + (S.rnd() - 0.5)*0.8, p[1] + (S.rnd() - 0.5)*0.8, 1.2, true); }
   S.ev.push({ t: 'die', i: s.i, by: by && by !== s ? by.i : -1, x: s.x, z: s.z });
 }
 
@@ -83,16 +83,19 @@ function think(S, s, g) {
       if (Math.hypot(x, z) > S.R - r - 1) { d += 6 - k; continue; } if (hit(g, x, z, r + 0.4, s, true)) d += 6 - k; } return d; };
   if (A.think <= 0) { A.think = 0.25 + S.rnd()*0.2;
     // something tasty nearby, or a smaller snake to cut off
-    let best = null, bs = -1;
-    for (const f of S.food) { const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx*dx + dz*dz; if (d2 > 400) continue; const sc = f[3]/(d2 + 4); if (sc > bs) { bs = sc; best = [f[1], f[2]]; } }
-    A.hunt = 0;
-    if (S.rnd() < A.skill*0.5) for (const o of S.sn) { if (o === s || !o.alive || o.L > s.L*1.3) continue; const d = Math.hypot(o.x - s.x, o.z - s.z); if (d < 12) { best = [o.x + Math.cos(o.a)*4, o.z + Math.sin(o.a)*4]; A.hunt = 1; break; } }
+    // what's left of a snake that just died is worth a dash from much further away
+    let best = null, bs = -1, feast = false, cd = 1e9; const sight = 18 + A.skill*14;
+    for (const f of S.food) { const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx*dx + dz*dz;
+      if (f[4] >= 0 && S.tm - f[4] < 8 && d2 < sight*sight) { if (d2 < cd) { cd = d2; best = [f[1], f[2]]; feast = d2 > 25; } continue; }
+      if (cd < 1e9 || d2 > 400) continue; const sc = f[3]/(d2 + 4); if (sc > bs) { bs = sc; best = [f[1], f[2]]; } }
+    A.hunt = 0; A.feast = feast;
+    if (!feast && S.rnd() < A.skill*0.5) for (const o of S.sn) { if (o === s || !o.alive || o.L > s.L*1.3) continue; const d = Math.hypot(o.x - s.x, o.z - s.z); if (d < 12) { best = [o.x + Math.cos(o.a)*4, o.z + Math.sin(o.a)*4]; A.hunt = 1; break; } }
     A.goal = best || [-s.x*0.3, -s.z*0.3];
   }
   const want = Math.atan2(A.goal[1] - s.z, A.goal[0] - s.x);
   let pick = want, low = 1e9;
   for (const off of [0, 0.4, -0.4, 0.9, -0.9, 1.5, -1.5, 2.2, -2.2]) { const a = s.a + off, d = danger(a), cost = d*10 + Math.abs(wrap(a - want))*(1.2 - A.skill*0.5); if (cost < low) { low = cost; pick = a; } }
-  s.ta = wrap(pick); s.boost = (A.hunt && s.L > LMIN + 6 && danger(s.a) === 0) || (low >= 10 && s.L > LMIN + 2 && S.rnd() < A.skill*0.3);
+  s.ta = wrap(pick); s.boost = ((A.hunt || A.feast) && s.L > LMIN + 5 && danger(s.a) === 0 && Math.abs(wrap(pick - want)) < 0.5) || (low >= 10 && s.L > LMIN + 2 && S.rnd() < A.skill*0.3);
 }
 
 export function step(S) {

@@ -114,8 +114,8 @@ function removeHuman(S, id) {
   if (s && s.alive) die(S, s, null);
 }
 __name(removeHuman, "removeHuman");
-function food(S, x, z, v) {
-  const f = [S.fid++, q(x), q(z), v];
+function food(S, x, z, v, corpse) {
+  const f = [S.fid++, q(x), q(z), v, corpse ? S.tm : -1];
   S.food.push(f);
   S.fa.push(f);
   return f;
@@ -137,7 +137,7 @@ function die(S, s, by) {
   if (by && by !== s) by.kills++;
   for (let k = 0; k < s.tr.length; k += 2) {
     const p = s.tr[k];
-    if (Math.hypot(p[0], p[1]) < S.R - 1) food(S, p[0] + (S.rnd() - 0.5) * 0.8, p[1] + (S.rnd() - 0.5) * 0.8, 1.2);
+    if (Math.hypot(p[0], p[1]) < S.R - 1) food(S, p[0] + (S.rnd() - 0.5) * 0.8, p[1] + (S.rnd() - 0.5) * 0.8, 1.2, true);
   }
   S.ev.push({ t: "die", i: s.i, by: by && by !== s ? by.i : -1, x: s.x, z: s.z });
 }
@@ -195,10 +195,19 @@ function think(S, s, g) {
   }, "danger");
   if (A.think <= 0) {
     A.think = 0.25 + S.rnd() * 0.2;
-    let best = null, bs = -1;
+    let best = null, bs = -1, feast = false, cd = 1e9;
+    const sight = 18 + A.skill * 14;
     for (const f of S.food) {
       const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx * dx + dz * dz;
-      if (d2 > 400) continue;
+      if (f[4] >= 0 && S.tm - f[4] < 8 && d2 < sight * sight) {
+        if (d2 < cd) {
+          cd = d2;
+          best = [f[1], f[2]];
+          feast = d2 > 25;
+        }
+        continue;
+      }
+      if (cd < 1e9 || d2 > 400) continue;
       const sc = f[3] / (d2 + 4);
       if (sc > bs) {
         bs = sc;
@@ -206,7 +215,8 @@ function think(S, s, g) {
       }
     }
     A.hunt = 0;
-    if (S.rnd() < A.skill * 0.5) for (const o of S.sn) {
+    A.feast = feast;
+    if (!feast && S.rnd() < A.skill * 0.5) for (const o of S.sn) {
       if (o === s || !o.alive || o.L > s.L * 1.3) continue;
       const d = Math.hypot(o.x - s.x, o.z - s.z);
       if (d < 12) {
@@ -227,7 +237,7 @@ function think(S, s, g) {
     }
   }
   s.ta = wrap(pick);
-  s.boost = A.hunt && s.L > LMIN + 6 && danger(s.a) === 0 || low >= 10 && s.L > LMIN + 2 && S.rnd() < A.skill * 0.3;
+  s.boost = (A.hunt || A.feast) && s.L > LMIN + 5 && danger(s.a) === 0 && Math.abs(wrap(pick - want)) < 0.5 || low >= 10 && s.L > LMIN + 2 && S.rnd() < A.skill * 0.3;
 }
 __name(think, "think");
 function step(S) {
