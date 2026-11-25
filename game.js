@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.9';
+import * as G from './sim.js?v=1.10';
 
-export const VERSION = '1.9';
+export const VERSION = '1.10';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -180,14 +180,14 @@ let AUTH = null, RTT = 0.1, corrX = 0, corrZ = 0, corrA = 0, predLast = null;
 const PRED = { ok: false, x: 0, z: 0, a: 0, path: [], bx: 0, bz: 0, ba: 0 };
 function logInput(c, key) { const t = performance.now(); INLOG.push({ t, r: c.r | 0, a: c.a, b: !!c.b, key }); while (INLOG.length > 2 && INLOG[1].t < t - 3000) INLOG.shift(); }
 function inputAt(t) { let v = null; for (let i = INLOG.length - 1; i >= 0; i--) if (INLOG[i].t <= t) { v = INLOG[i]; break; } return v || INLOG[0] || null; }
-function setAuth(x, z, a, L, alive, t0) {
+function setAuth(x, z, a, L, alive, t0, tm) {
   const old = predLast ? { x: predLast.x, z: predLast.z, a: predLast.a } : null;
-  AUTH = { x, z, a, L, alive, t0 };
+  AUTH = { x, z, a, L, alive, t0, tm };
   if (old && alive) { const p = predict(performance.now(), false); if (p) { corrX += old.x - p.x; corrZ += old.z - p.z; corrA += wrapA(old.a - p.a); } }
 }
 const wrapA = (a) => { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a += 2*Math.PI; return a; };
 function predict(now, keepPath) {
-  if (!AUTH || !AUTH.alive) return null;
+  if (!AUTH || !AUTH.alive || !(AUTH.tm > 0)) return null;
   const lag = MODE === 'net' ? RTT*500 : 0, end = now + lag, from = AUTH.t0; if (end - from > 600) return null;
   let x = AUTH.x, z = AUTH.z, a = AUTH.a, t = from; const path = keepPath ? PRED.path : null; if (path) path.length = 0;
   while (t < end) { const h = Math.min(1000/60, end - t); t += h; const inp = inputAt(t - lag); if (!inp) { x += Math.cos(a)*G.V*h/1000; z += Math.sin(a)*G.V*h/1000; continue; }
@@ -365,6 +365,7 @@ function controls(dt) {
   if (MODE === 'demo') return; const me = meS(); if (!me || !me.alive) { KH = null; return; }
   const r = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
   const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight || !!keys.KeyW || !!keys.ArrowUp, t = performance.now();
+  if (M.tm <= 0) { KH = null; return; }
   if (r) { if (src !== 'key' || KH === null) KH = PRED.ok ? PRED.a : me.a; src = 'key'; KH = wrapA(KH + r*G.TURN*(b && me.L > G.LMIN ? 0.8 : 1)*dt); }
   const a = src === 'key' && KH !== null ? KH : (aim === null ? me.a : aim);
   const released = src === 'key' && r === 0 && sentR !== 0; sentR = r;
@@ -400,7 +401,7 @@ function netSnap(s) {
   if (s.full && (!M.ready || s.tm < lastTick - 5)) { Q.length = 0; applySnap(s); playTick = lastTick = s.tm; ALPHA = 1; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; return; }
   if (!M.ready) return; Q.push(s); lastTick = s.tm;
   const i = M.sn.findIndex((v) => v.id === ME), h = i >= 0 && s.sn[i];
-  if (h) setAuth(h[1]/100, h[2]/100, h[3]/100, h[4]/100, !!(h[5] & 1), performance.now() - RTT*500);
+  if (h) setAuth(h[1]/100, h[2]/100, h[3]/100, h[4]/100, !!(h[5] & 1), performance.now() - RTT*500, s.tm/20);
 }
 function netPlay(dt) {
   if (MODE !== 'net' || !M.ready) return;
@@ -439,7 +440,7 @@ function loop(t) {
   const dt = Math.min(0.1, (t - last)/1000); last = t; U.time.value = t/1000;
   const t0 = performance.now();
   if (LS) { if (LS.ph === 'play') { acc += dt; let n = 0; while (acc >= G.TICK && n++ < 5) { G.step(LS); applySnap(G.snap(LS, false)); acc -= G.TICK; } if (acc > G.TICK) acc = 0; ALPHA = acc/G.TICK;
-      const ms = LS.sn.find((v) => v.id === 'me'); if (ms && n) setAuth(ms.x, ms.z, ms.a, ms.L, ms.alive, performance.now() - acc*1000); } else ALPHA = 1;
+      const ms = LS.sn.find((v) => v.id === 'me'); if (ms && n) setAuth(ms.x, ms.z, ms.a, ms.L, ms.alive, performance.now() - acc*1000, LS.tm); } else ALPHA = 1;
     if (MODE === 'demo' && LS.ph === 'over') { if (!LS.endAt) LS.endAt = t; else if (t - LS.endAt > 2500) newLocal(false); } }
   netPlay(dt); controls(dt); predFrame(dt); const tA = performance.now(); drawWorld(dt); const tB = performance.now(); hud(dt); R.render(scene, cam); const tC = performance.now(); PROF.draw = PROF.draw*0.95 + (tB - tA)*0.05; PROF.render = PROF.render*0.95 + (tC - tB)*0.05;
   // too slow for this phone? fewer pixels first, then fewer effects. Only ever downwards, so it never hitches back and forth.
