@@ -59,6 +59,8 @@
   #res div.me { border: 1px solid var(--c); box-shadow: 0 0 12px rgba(0,240,255,.3); }
   #res .p { width: 26px; font: 400 18px 'Russo One', system-ui, sans-serif; text-align: center; } #res .n { flex: 1; } #res .s { color: var(--mut); font-size: 13px; }
   #res i { width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+  #ver { position: fixed; right: 8px; bottom: calc(4px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--mut); opacity: .6; z-index: 4; pointer-events: none; }
+  #hud.on ~ #ver { bottom: auto; top: calc(46px + env(safe-area-inset-top)); left: 50%; right: auto; transform: translateX(-50%); }
   #load { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 22px; z-index: 9; }
 </style>
 <script type="importmap">{ "imports": { "three": "./lib/three.module.js" } }</script>
@@ -113,7 +115,8 @@
   <button class="b q" id="toHome">В меню</button>
 </div>
 
+<div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js"></script>
+<script type="module" src="./game.js?v=1.5"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@ name: Deploy worker
 on:
   push:
     branches: [main]
-    paths: ['server/**', 'sim.js', 'game.js', 'index.html', 'lib/**', 'test/**', 'wrangler.toml', '.assetsignore', '.github/workflows/deploy.yml']
+    paths: ['server/**', 'sim.js', 'game.js', 'index.html', 'lib/**', 'test/**', 'wrangler.toml', '.assetsignore', '_headers', '.github/workflows/deploy.yml']
   workflow_dispatch:
 jobs:
   deploy:
