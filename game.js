@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.20';
+import * as G from './sim.js?v=1.21';
 
-export const VERSION = '1.20';
+export const VERSION = '1.21';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -44,8 +44,9 @@ const floorMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false
   fragmentShader: `uniform float uR, uWarn; varying vec2 vP; void main(){ float dr = length(vP)-uR;
     float line = smoothstep(.22,.0,abs(dr))*.9 + exp(-abs(dr)*3.5)*.22*step(0.,dr), dim = smoothstep(0.,.6,dr)*.75;
     gl_FragColor = vec4(mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn)*line, dim); }` });
-let edgeR = -1; const edge = new THREE.Mesh(new THREE.RingGeometry(1, 2, 8, 1), floorMat); edge.rotation.x = -Math.PI/2; edge.position.y = 0.005; edge.renderOrder = 1; scene.add(edge);
-function edgeAt(r) { if (Math.abs(r - edgeR) < 0.02) return; edgeR = r; edge.geometry.dispose(); edge.geometry = new THREE.RingGeometry(Math.max(0.1, r - 0.6), FLOOR_R + 1, 128, 1); }
+let edgeR = -1; const EDGE_SEG = 128, edge = new THREE.Mesh(new THREE.RingGeometry(G.R0 - 0.6, FLOOR_R + 1, EDGE_SEG, 1), floorMat); edge.rotation.x = -Math.PI/2; edge.position.y = 0.005; edge.renderOrder = 1; scene.add(edge);
+function edgeAt(r) { if (Math.abs(r - edgeR) < 0.02) return; edgeR = r; const p = edge.geometry.attributes.position, a = p.array, ri = Math.max(0.1, r - 0.6);
+  for (let i = 0; i <= EDGE_SEG; i++) { const t = i/EDGE_SEG*Math.PI*2; a[i*3] = Math.cos(t)*ri; a[i*3 + 1] = Math.sin(t)*ri; } p.clearUpdateRanges(); p.addUpdateRange(0, (EDGE_SEG + 1)*3); p.needsUpdate = true; }
 edgeAt(G.R0);
 
 // the wall of light around the arena
@@ -155,6 +156,7 @@ for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { try { 
 // the arena setting for solo play, remembered on this phone
 let FIXED = false; try { FIXED = localStorage.getItem('fixed') === '1'; } catch (e) {}
 function arenaLabel(f) { return f ? '⭕ Арена: не сжимается' : '🎯 Арена: сжимается'; }
+let FT0 = performance.now();   // the time of the frame being drawn: prediction and ticks all measure against it
 let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
 let MODE = 'demo', LS = null, M = G.mirror(), ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
 function applySnap(o) {
@@ -187,12 +189,14 @@ function onEvent(e) {
 const INLOG = [];   // what the controls said and when: { t, r, a, b, key }
 let AUTH = null, RTT = 0.1, corrX = 0, corrZ = 0, corrA = 0, predLast = null;
 const PRED = { ok: false, x: 0, z: 0, a: 0, path: [], bx: 0, bz: 0, ba: 0 };
-function logInput(c, key) { const t = performance.now(); INLOG.push({ t, r: c.r | 0, a: c.a, b: !!c.b, key }); while (INLOG.length > 2 && INLOG[1].t < t - 3000) INLOG.shift(); }
+function logInput(c, key) { const t = FT0; INLOG.push({ t, r: c.r | 0, a: c.a, b: !!c.b, key }); while (INLOG.length > 2 && INLOG[1].t < t - 3000) INLOG.shift(); }
 function inputAt(t) { let v = null; for (let i = INLOG.length - 1; i >= 0; i--) if (INLOG[i].t <= t) { v = INLOG[i]; break; } return v || INLOG[0] || null; }
 function setAuth(x, z, a, L, alive, t0, tm) {
-  const old = predLast ? { x: predLast.x, z: predLast.z, a: predLast.a } : null;
+  // where the old word put the head right now, against where the new word puts it at the same moment:
+  // only a real disagreement becomes a correction, never the distance moved since the last frame
+  const old = predLast && AUTH && AUTH.alive ? predict(FT0, false) : null;
   AUTH = { x, z, a, L, alive, t0, tm };
-  if (old && alive) { const p = predict(performance.now(), false); if (p) { corrX += old.x - p.x; corrZ += old.z - p.z; corrA += wrapA(old.a - p.a); } }
+  if (old && alive) { const p = predict(FT0, false); if (p) { corrX += old.x - p.x; corrZ += old.z - p.z; } }
 }
 const wrapA = (a) => { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a += 2*Math.PI; return a; };
 function predict(now, keepPath) {
@@ -207,7 +211,7 @@ function predict(now, keepPath) {
 }
 function predFrame(dt) {
   PRED.ok = false; const me = meS(); if (MODE === 'demo' || !me || !me.alive || !AUTH || !AUTH.alive) { corrX = corrZ = corrA = 0; predLast = null; return; }
-  const p = predict(performance.now(), true); if (!p) { predLast = null; return; }
+  const p = predict(FT0, true); if (!p) { predLast = null; return; }
   const k = Math.exp(-dt*12); corrX *= k; corrZ *= k; corrA = 0; predLast = p;
   PRED.ok = true; PRED.x = p.x + corrX; PRED.z = p.z + corrZ; PRED.a = src === 'key' && KH !== null ? KH : p.a; PRED.bx = AUTH.x; PRED.bz = AUTH.z; PRED.ba = AUTH.a;
 }
@@ -449,27 +453,36 @@ $('again').onclick = () => { aim = null; if (MODE === 'net') { if (NET && NET.ws
 
 // ---- the loop: fixed-step rules, free-running pictures, and a speed check ----
 const PROF = { draw: 0, render: 0 };
+let STATS = false, verTaps = 0, verT = 0;
 let last = performance.now(), fpsT = 0, frames = 0, msSum = 0, QL = 1; const FT = [];
 function setQ() { R.setPixelRatio(DPR); resize(); }
+let CAP = 0;   // 0: every refresh; otherwise draw only when this many ms have passed (an even 60 on a 90/120 Hz screen)
 function loop(t) {
   requestAnimationFrame(loop);
   if (document.hidden) { last = t; return; }
-  const dt = Math.min(0.1, (t - last)/1000); last = t; U.time.value = t/1000;
+  if (CAP && t - last < CAP) return;
+  const dt = Math.min(0.1, (t - last)/1000); last = t; FT0 = t; U.time.value = t/1000;
   const t0 = performance.now();
   if (LS) { if (LS.ph === 'play') { acc += dt; let n = 0; while (acc >= G.TICK && n++ < 5) { G.step(LS); applySnap(G.snap(LS, false)); acc -= G.TICK; } if (acc > G.TICK) acc = 0; ALPHA = acc/G.TICK;
-      const ms = LS.sn.find((v) => v.id === 'me'); if (ms && n) setAuth(ms.x, ms.z, ms.a, ms.L, ms.alive, performance.now() - acc*1000, LS.tm); } else ALPHA = 1;
+      const ms = LS.sn.find((v) => v.id === 'me'); if (ms && n) setAuth(ms.x, ms.z, ms.a, ms.L, ms.alive, FT0 - acc*1000, LS.tm); } else ALPHA = 1;
     if (MODE === 'demo' && LS.ph === 'over') { if (!LS.endAt) LS.endAt = t; else if (t - LS.endAt > 2500) newLocal(false); } }
   netPlay(dt); controls(dt); predFrame(dt); const tA = performance.now(); drawWorld(dt); const tB = performance.now(); hud(dt); R.render(scene, cam); const tC = performance.now(); PROF.draw = PROF.draw*0.95 + (tB - tA)*0.05; PROF.render = PROF.render*0.95 + (tC - tB)*0.05;
   // too slow for this phone? Judge by frames that came late compared with this screen's own pace (60, 90 or 120 Hz):
   // fewer pixels first, then fewer effects. Only ever downwards, so it never hitches back and forth.
   msSum += performance.now() - t0; frames++; fpsT += dt; FT.push(dt);
   if (fpsT > 2) { FT.sort((a, b) => a - b); const base = FT[Math.floor(FT.length*0.2)], late = FT.filter((d) => d > base*1.6).length/FT.length;
-    if (late > 0.08 && !window.__noAdapt) { if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
+    if (late > 0.08 && !window.__noAdapt) {
+      // a fast screen the phone cannot keep up with: an even 60 looks far smoother than an uneven 120
+      if (!CAP && base < 13) CAP = 12.5;
+      else if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
+    if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '');
     window.__fps = frames/fpsT; window.__late = late; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; FT.length = 0; }
 }
 
 // start: the menu over a live arena of bots, or straight into a room from a link
 if (TG) { try { TG.ready(); TG.expand(); if (TG.disableVerticalSwipes) TG.disableVerticalSwipes(); TG.setHeaderColor && TG.setHeaderColor('#04050c'); TG.setBackgroundColor && TG.setBackgroundColor('#04050c'); } catch (e) {} }
-$('ver').textContent = 'v' + VERSION; newLocal(false); burst(0, 0, 0xffffff, 1); try { R.compile(scene, cam); } catch (e) {} show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
+$('ver').textContent = 'v' + VERSION; $('ver').style.pointerEvents = 'auto';
+$('ver').addEventListener('pointerdown', (e) => { e.stopPropagation(); const t = performance.now(); verTaps = t - verT < 600 ? verTaps + 1 : 1; verT = t; if (verTaps >= 3) { STATS = !STATS; verTaps = 0; if (!STATS) $('ver').textContent = 'v' + VERSION; } });
+newLocal(false); burst(0, 0, 0xffffff, 1); try { R.compile(scene, cam); } catch (e) {} show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
 const sp = zt().start || (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '', rm = /^r_([a-z0-9]{6,12})$/.exec(sp); if (rm && initStr()) netJoin(rm[1]);
-window.__hide = (k) => { const o = { floor, wall, glow, food: foodPts, sparks: spPts }[k]; if (o) o.visible = false; if (k === 'snakes') VIS.forEach((v) => v && (v.body.material.visible = false)); if (k === 'hud') document.getElementById('hud').style.display = 'none'; }; window.__fixDpr = (d) => { DPR = d; QL = 1; R.setPixelRatio(d); resize(); window.__noAdapt = true; }; window.__GL = { R, scene, cam, floor, glow, foodPts, spPts, VIS, THREE }; window.__LS = () => LS; window.__pred = () => PRED; window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
+window.__hide = (k) => { const o = { floor, wall, glow, food: foodPts, sparks: spPts }[k]; if (o) o.visible = false; if (k === 'snakes') VIS.forEach((v) => v && (v.body.material.visible = false)); if (k === 'hud') document.getElementById('hud').style.display = 'none'; }; window.__fixDpr = (d) => { DPR = d; QL = 1; R.setPixelRatio(d); resize(); window.__noAdapt = true; }; window.__GL = { R, scene, cam, floor, glow, foodPts, spPts, VIS, THREE }; window.__LS = () => LS; window.__pred = () => PRED; window.__dbg = () => ({ ft: FT0, cx: corrX, cz: corrZ, at: AUTH && AUTH.t0, ax: AUTH && AUTH.x, acc, alpha: ALPHA }); window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
