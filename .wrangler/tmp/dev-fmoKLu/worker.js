@@ -291,7 +291,9 @@ function step(S) {
     const o = h.o, back = o && hits.get(o);
     if (o && back && back.o === s) {
       if (h.k <= FRONT && back.k <= FRONT) {
-        if (s.L > o.L + 0.5) continue;
+        const dx = o.x - s.x, dz = o.z - s.z, d = Math.hypot(dx, dz) || 1, mine = (Math.cos(s.a) * dx + Math.sin(s.a) * dz) / d, theirs = -(Math.cos(o.a) * dx + Math.sin(o.a) * dz) / d;
+        if (theirs - mine > 0.35) continue;
+        if (mine - theirs <= 0.35 && s.L > o.L + 0.5) continue;
       } else if (h.k < back.k) continue;
     }
     die(S, s, o);

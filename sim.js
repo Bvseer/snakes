@@ -123,7 +123,12 @@ export function step(S) {
   const FRONT = 2;
   for (const [s, h] of hits) { if (!s.alive) continue; const o = h.o, back = o && hits.get(o);
     if (o && back && back.o === s) {
-      if (h.k <= FRONT && back.k <= FRONT) { if (s.L > o.L + 0.5) continue; }   // head to head
+      if (h.k <= FRONT && back.k <= FRONT) {
+        // heads touching: whoever was driving into the other is to blame; only a real head-on goes by length
+        const dx = o.x - s.x, dz = o.z - s.z, d = Math.hypot(dx, dz) || 1, mine = (Math.cos(s.a)*dx + Math.sin(s.a)*dz)/d, theirs = -(Math.cos(o.a)*dx + Math.sin(o.a)*dz)/d;
+        if (theirs - mine > 0.35) continue;                       // they drove into me
+        if (mine - theirs <= 0.35 && s.L > o.L + 0.5) continue;   // head-on: the longer one lives
+      }
       else if (h.k < back.k) continue;                                            // I only touched the front of the one who rammed me
     }
     die(S, s, o); }

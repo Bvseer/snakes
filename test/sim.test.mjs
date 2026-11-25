@@ -41,3 +41,8 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
     for (let i = 0; i < 70; i++) G.step(S);
     others.forEach((o, j) => { total++; if (Math.hypot(o.x - spot[0], o.z - spot[1]) < before[j] - 3 || o.L > 40) came++; }); }
   console.log('bots that rushed to the remains:', came + '/' + total); if (came < total*0.6) { console.log('FAIL bots ignore corpses'); process.exitCode = 1; } }
+// a snake drives its head into the side of my head: it dies, I live (even if I am shorter)
+{ const S = G.newGame(6); S.tm = 0; const me = G.addSnake(S, 'm', 'Me', false), o = G.addSnake(S, 'o', 'O', false);
+  me.tr = []; o.tr = []; for (let k = 30; k >= 0; k--) G.addHead(me, -k*G.SEG, 0); me.a = 0; me.ta = 0; me.L = 20;
+  for (let k = 30; k >= 0; k--) G.addHead(o, 0.25, -1.6 - k*G.SEG); o.a = Math.PI/2; o.ta = o.a; o.L = 60;
+  for (let i = 0; i < 8 && me.alive && o.alive; i++) { me.ta = 0; G.step(S); } console.log('rammed in the side of the head: me', me.alive ? 'alive' : 'dead', '| rammer', o.alive ? 'alive' : 'dead'); if (!me.alive || o.alive) { console.log('FAIL side-of-head rule'); process.exitCode = 1; } }
