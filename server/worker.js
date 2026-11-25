@@ -118,7 +118,7 @@ export default {
         return r && r.ok ? json({ ok: true, id: r.result.id }) : json({ ok: false, err: (r && r.description) || 'tg' }, 502); }
       if (path === '/tg' && request.method === 'POST') return await telegram(env, request);
       if (path === '/setup') { if (!env.HOOK_SECRET || url.searchParams.get('key') !== env.HOOK_SECRET) return json({ ok: false, err: 'key' }, 403); return json(Object.assign({ ok: true }, await setup(env, url.origin))); }
-      if (path === '/') return json({ ok: true, name: 'Neon Snakes', rooms: !!env.ROOMS, token: !!env.BOT_TOKEN, key: !!env.HOOK_SECRET });
+      if (path === '/' || path === '/health') return json({ ok: true, name: 'Neon Snakes', rooms: !!env.ROOMS, token: !!env.BOT_TOKEN, key: !!env.HOOK_SECRET });
       return json({ ok: false, err: 'path' }, 404);
     } catch (e) { return json({ ok: false, err: 'server', msg: String(e && e.message || e).slice(0, 200) }, 500); }
   },

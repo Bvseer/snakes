@@ -1,0 +1,11 @@
+.git
+.github
+.dev.vars
+.gitignore
+.assetsignore
+server
+test
+wrangler.toml
+node_modules
+.wrangler
+*.md
