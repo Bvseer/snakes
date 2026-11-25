@@ -61,7 +61,7 @@ function die(S, s, by) {
 }
 
 // every body point, by cell, for collisions and for bots looking where they go
-const CELL = 3;
+const CELL = 3, HIT = { k: 0 };
 function grid(S) {
   const g = new Map();
   for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L);
@@ -71,7 +71,7 @@ function grid(S) {
 function hit(g, x, z, r, me, skipOwn) {
   const cx = Math.floor(x/CELL), cz = Math.floor(z/CELL);
   for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) { const c = g.get(i*1000 + j); if (!c) continue;
-    for (let n = 0; n < c.length; n += 5) { const o = c[n]; if (o === me) continue; const dx = c[n + 1] - x, dz = c[n + 2] - z, rr = c[n + 3] + r; if (dx*dx + dz*dz < rr*rr*0.8) return o; } }
+    for (let n = 0; n < c.length; n += 5) { const o = c[n]; if (o === me) continue; const dx = c[n + 1] - x, dz = c[n + 2] - z, rr = c[n + 3] + r; if (dx*dx + dz*dz < rr*rr*0.8) { HIT.k = c[n + 4]; return o; } } }
   return null;
 }
 
@@ -111,16 +111,24 @@ export function step(S) {
     if (boost) { s.L = q(s.L - 1.6*TICK); s.dropT += TICK; if (s.dropT > 0.35) { s.dropT = 0; const p = s.tr[s.tr.length - 1]; food(S, p[0], p[1], 0.5); } }
     s.boosting = boost;
   }
-  g = grid(S);
+  // who hit whom this tick. Ramming someone's side right behind their head brings your head next to theirs too:
+  // then only the one who did the ramming dies. Two snakes meeting head to head: the shorter one goes (both if equal).
+  g = grid(S); const hits = new Map();
   for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L);
-    if (Math.hypot(s.x, s.z) > S.R - r) { die(S, s, null); continue; }
-    const o = hit(g, s.x, s.z, r, s, false); if (o) die(S, s, o);
-  }
+    if (Math.hypot(s.x, s.z) > S.R - r) { hits.set(s, { o: null, k: 0 }); continue; }
+    const o = hit(g, s.x, s.z, r, s, false); if (o) hits.set(s, { o, k: HIT.k }); }
+  const FRONT = 2;
+  for (const [s, h] of hits) { if (!s.alive) continue; const o = h.o, back = o && hits.get(o);
+    if (o && back && back.o === s) {
+      if (h.k <= FRONT && back.k <= FRONT) { if (s.L > o.L + 0.5) continue; }   // head to head
+      else if (h.k < back.k) continue;                                            // I only touched the front of the one who rammed me
+    }
+    die(S, s, o); }
   // eating, and food the closing wall burns
   const keep = [];
   for (const f of S.food) { let eaten = false;
     if (Math.hypot(f[1], f[2]) > S.R - 0.3) eaten = true;
-    else for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L) + 0.9, dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz < r*r) { s.L = q(s.L + f[3]); s.best = Math.max(s.best, s.L); eaten = true; if (f[3] >= 1) S.ev.push({ t: 'eat', i: s.i }); break; } }
+    else for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L) + 0.9, dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz < r*r) { s.L = q(s.L + f[3]); s.best = Math.max(s.best, s.L); eaten = true; S.ev.push({ t: 'eat', i: s.i, v: f[3] >= 1 ? 1 : 0 }); break; } }
     if (eaten) S.fr.push(f[0]); else keep.push(f); }
   S.food = keep; topUpFood(S);
   const alive = S.sn.filter((s) => s.alive), humansAlive = alive.filter((s) => !s.bot).length;

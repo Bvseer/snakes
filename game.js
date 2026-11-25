@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.8';
+import * as G from './sim.js?v=1.9';
 
-export const VERSION = '1.8';
+export const VERSION = '1.9';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -130,7 +130,20 @@ function burst(x, z, col, n) { for (let k = 0; k < n; k++) { const a = Math.rand
 // ---- sound: a few synth blips, nothing to download ----
 let AC = null;
 function beep(f, d, type, vol, slide) { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + d); g.gain.setValueAtTime(vol || 0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(AC.destination); o.start(t); o.stop(t + d); } catch (e) {} }
-let eatT = 0;
+let eatT = 0, eatN = 0, NOISE = null;
+// "хлюп": a short burst of wet noise through a falling filter, over a pitch that drops
+function slurp(big) {
+  try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); const t = AC.currentTime;
+    if (!NOISE) { NOISE = AC.createBuffer(1, AC.sampleRate*0.2, AC.sampleRate); const d = NOISE.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1; }
+    const up = eatN++ % 2 ? 1.18 : 1, f0 = (big ? 520 : 760)*up*(0.94 + Math.random()*0.12), len = big ? 0.16 : 0.1;
+    const o = AC.createOscillator(), og = AC.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0*0.35, t + len);
+    og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(big ? 0.09 : 0.06, t + 0.012); og.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    const n = AC.createBufferSource(), bp = AC.createBiquadFilter(), ng = AC.createGain(); n.buffer = NOISE; bp.type = 'bandpass'; bp.Q.value = 6; bp.frequency.setValueAtTime(f0*2.2, t); bp.frequency.exponentialRampToValueAtTime(f0*0.6, t + len);
+    ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(big ? 0.05 : 0.03, t + 0.008); ng.gain.exponentialRampToValueAtTime(0.0001, t + len*0.8);
+    o.connect(og).connect(AC.destination); n.connect(bp).connect(ng).connect(AC.destination); o.start(t); o.stop(t + len + 0.02); n.start(t); n.stop(t + len); } catch (e) {}
+}
+// phones only allow sound after a touch or a key: wake the sound up on the first one
+for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }, { passive: true });
 
 // ---- the game being shown --------------------------------------------------
 let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
@@ -156,7 +169,7 @@ function onEvent(e) {
       if (s.id === ME) { big('Ты разбился!<small>' + (by ? 'врезался в ' + esc(by.name) : 'стена арены') + '</small>', 2200); haptic('heavy'); beep(180, 0.5, 'sawtooth', 0.12, 40); }
       else if (by && by.id === ME) { big('Есть!<small>' + esc(s.name) + ' врезался в тебя</small>', 1500); haptic('medium'); beep(520, 0.25, 'square', 0.07, 1040); }
       else if (dist < 30) beep(260, 0.3, 'triangle', 0.06, 90); } }
-  else if (e.t === 'eat' && MODE !== 'demo') { const s = M.sn[e.i]; if (s && s.id === ME && performance.now() - eatT > 70) { eatT = performance.now(); beep(700 + Math.random()*300, 0.08, 'sine', 0.05, 1400); } }
+  else if (e.t === 'eat' && MODE !== 'demo') { const s = M.sn[e.i]; if (s && s.id === ME && performance.now() - eatT > 75) { eatT = performance.now(); slurp(!!e.v); } }
 }
 
 // ---- your own snake answers your hand at once ----

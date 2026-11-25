@@ -21,3 +21,14 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
 { const S = G.newGame(3); S.tm = 0; const me = G.addSnake(S, 'k', 'K', false); G.fillBots(S);
   const a0 = me.a; G.input(S, 'k', { r: 1 }); for (let i = 0; i < 5; i++) G.step(S); const a1 = me.a; G.input(S, 'k', { r: 0 }); G.step(S); G.step(S); G.step(S);
   console.log('turn while held:', (a1 - a0).toFixed(2), 'after release:', (me.a - a1).toFixed(3)); if (Math.abs(me.a - a1) > 1e-9 || a1 - a0 < 0.8) { console.log('FAIL key turning'); process.exitCode = 1; } }
+// ramming: A drives its head into B's side right behind B's head; only A dies
+{ const S = G.newGame(4); S.tm = 0; const A = G.addSnake(S, 'a', 'A', false), B = G.addSnake(S, 'b', 'B', false);
+  // B lies along +x with its head at (0,0); A comes down from above, its head just touching B's neck
+  B.tr = []; B.n = 0; for (let k = 40; k >= 0; k--) G.addHead(B, -k*G.SEG, 0); B.a = 0; B.ta = 0;
+  A.tr = []; A.n = 0; for (let k = 40; k >= 0; k--) G.addHead(A, -0.9, -2.2 - k*G.SEG + 2.2 - 0.3 + 0.0); A.a = Math.PI/2; A.ta = A.a;
+  A.x = -0.9; A.z = -1.2; G.addHead(A, -0.9, -0.55);
+  G.step(S); console.log('ram from the side: A', A.alive ? 'alive' : 'dead', '| B', B.alive ? 'alive' : 'dead'); if (A.alive || !B.alive) { console.log('FAIL ram rule'); process.exitCode = 1; } }
+// head to head: the shorter goes
+{ const S = G.newGame(5); S.tm = 0; const A = G.addSnake(S, 'a', 'A', false), B = G.addSnake(S, 'b', 'B', false);
+  A.tr = []; B.tr = []; for (let k = 30; k >= 0; k--) { G.addHead(A, -0.7 - k*G.SEG, 0); G.addHead(B, 0.7 + k*G.SEG, 0); } A.a = 0; A.ta = 0; B.a = Math.PI; B.ta = Math.PI; A.L = 40; B.L = 25;
+  G.step(S); console.log('head to head: longer A', A.alive ? 'alive' : 'dead', '| shorter B', B.alive ? 'alive' : 'dead'); if (!A.alive || B.alive) { console.log('FAIL head rule'); process.exitCode = 1; } }

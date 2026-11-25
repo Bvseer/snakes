@@ -143,6 +143,7 @@ function die(S, s, by) {
 }
 __name(die, "die");
 var CELL = 3;
+var HIT = { k: 0 };
 function grid(S) {
   const g = /* @__PURE__ */ new Map();
   for (const s of S.sn) {
@@ -167,7 +168,10 @@ function hit(g, x, z, r, me, skipOwn) {
       const o = c[n];
       if (o === me) continue;
       const dx = c[n + 1] - x, dz = c[n + 2] - z, rr = c[n + 3] + r;
-      if (dx * dx + dz * dz < rr * rr * 0.8) return o;
+      if (dx * dx + dz * dz < rr * rr * 0.8) {
+        HIT.k = c[n + 4];
+        return o;
+      }
     }
   }
   return null;
@@ -260,15 +264,27 @@ function step(S) {
     s.boosting = boost;
   }
   g = grid(S);
+  const hits = /* @__PURE__ */ new Map();
   for (const s of S.sn) {
     if (!s.alive) continue;
     const r = radius(s.L);
     if (Math.hypot(s.x, s.z) > S.R - r) {
-      die(S, s, null);
+      hits.set(s, { o: null, k: 0 });
       continue;
     }
     const o = hit(g, s.x, s.z, r, s, false);
-    if (o) die(S, s, o);
+    if (o) hits.set(s, { o, k: HIT.k });
+  }
+  const FRONT = 2;
+  for (const [s, h] of hits) {
+    if (!s.alive) continue;
+    const o = h.o, back = o && hits.get(o);
+    if (o && back && back.o === s) {
+      if (h.k <= FRONT && back.k <= FRONT) {
+        if (s.L > o.L + 0.5) continue;
+      } else if (h.k < back.k) continue;
+    }
+    die(S, s, o);
   }
   const keep = [];
   for (const f of S.food) {
@@ -281,7 +297,7 @@ function step(S) {
         s.L = q(s.L + f[3]);
         s.best = Math.max(s.best, s.L);
         eaten = true;
-        if (f[3] >= 1) S.ev.push({ t: "eat", i: s.i });
+        S.ev.push({ t: "eat", i: s.i, v: f[3] >= 1 ? 1 : 0 });
         break;
       }
     }
