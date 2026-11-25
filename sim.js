@@ -34,7 +34,7 @@ export function addSnake(S, id, name, bot) {
   const i = S.sn.length, ang = i/MAXS*Math.PI*2 + 0.3, r = R0*0.62;
   const x = q(Math.cos(ang)*r), z = q(Math.sin(ang)*r), a = wrap(ang + Math.PI/2);   // everyone starts on a ring, going round it
   const s = { i, id: String(id), name: String(name).slice(0, 16), bot: !!bot, col: i, x, z, a, ta: a, boost: false, L: L0, tr: [], alive: true, kills: 0, place: 0, dropT: 0, best: L0,
-    ai: bot ? { skill: 0.55 + S.rnd()*0.4, goal: null, think: 0, hunt: 0 } : null };
+    ai: bot ? { skill: 0.8 + S.rnd()*0.2, goal: null, think: 0, hunt: 0, v: 2 } : null };
   // a short straight tail behind the start point
   for (let k = Math.ceil(L0); k >= 0; k--) addHead(s, q(x - Math.cos(a)*k*SEG), q(z - Math.sin(a)*k*SEG));
   if (!bot) S.humans++; S.sn.push(s); return s;
@@ -60,6 +60,55 @@ function die(S, s, by) {
   S.ev.push({ t: 'die', i: s.i, by: by && by !== s ? by.i : -1, x: s.x, z: s.z });
 }
 
+// ---- the strong bot -----------------------------------------------------------
+// It tries a fan of headings, flies each one forward with its real turning circle for a second or so,
+// against every body on the field and every head where it will be by then, and takes the safest one
+// that still goes where it wants. It goes for thick patches of food, races to fresh remains,
+// cuts across the path of snakes it can outrun, and keeps off the wall when the arena closes in.
+const FAN = [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8, 1.15, -1.15, 1.6, -1.6, 2.2, -2.2, 3.0];
+function pickGoal(S, s, A) {
+  const sight = 22 + A.skill*12; A.boostWant = false; A.prey = null;
+  // 1. remains of a snake that just died
+  let best = null, cd = 1e9;
+  for (const f of S.food) { if (!(f[4] >= 0 && S.tm - f[4] < 8)) continue; const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx*dx + dz*dz; if (d2 < sight*sight && d2 < cd) { cd = d2; best = [f[1], f[2]]; } }
+  if (best) { A.goal = best; A.boostWant = cd > 30; return; }
+  // 2. someone to cut off: get to a point ahead of their head before they do, then cross it
+  if (s.L > LMIN + 8 && S.rnd() < 0.35 + A.skill*0.45) {
+    let pick = null, ps = 0;
+    for (const o of S.sn) { if (o === s || !o.alive) continue; const dx = o.x - s.x, dz = o.z - s.z, d = Math.hypot(dx, dz); if (d > 18 || d < 2) continue;
+      const lead = 3 + d*0.45, px = o.x + Math.cos(o.a)*lead, pz = o.z + Math.sin(o.a)*lead; if (Math.hypot(px, pz) > S.R - 3) continue;
+      const mine = Math.hypot(px - s.x, pz - s.z)/VB, theirs = lead/V; if (mine > theirs*0.85) continue;
+      const sc = (o.bot ? 1 : 1.6)*(1 + o.L/60)/(d + 4); if (sc > ps) { ps = sc; pick = [px + Math.cos(o.a)*1.5, pz + Math.sin(o.a)*1.5]; } }
+    if (pick) { A.goal = pick; A.boostWant = true; A.prey = true; return; }
+  }
+  // 3. the thickest patch of food within reach
+  const cells = new Map(), C = 4;
+  for (const f of S.food) { const dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz > 900) continue; const key = Math.floor(f[1]/C)*1000 + Math.floor(f[2]/C); const c = cells.get(key); if (c) { c[0] += f[3]; c[1] += f[1]*f[3]; c[2] += f[2]*f[3]; } else cells.set(key, [f[3], f[1]*f[3], f[2]*f[3]]); }
+  let bs = -1; for (const c of cells.values()) { const x = c[1]/c[0], z = c[2]/c[0], d = Math.hypot(x - s.x, z - s.z), ahead = Math.cos(Math.atan2(z - s.z, x - s.x) - s.a);
+    const sc = c[0]/(d + 5)*(1.15 + 0.35*ahead)*(Math.hypot(x, z) > S.R - 4 ? 0.2 : 1); if (sc > bs) { bs = sc; best = [x, z]; } }
+  // 4. the wall is closing in: stay towards the middle
+  if (S.tm > SHRINK - 5 && Math.hypot(s.x, s.z) > S.R*0.65) best = [s.x*0.3, s.z*0.3];
+  A.goal = best || [-s.x*0.3, -s.z*0.3];
+}
+function think2(S, s, g) {
+  const A = s.ai, r = radius(s.L), H = 0.8 + A.skill*0.6, closing = S.tm > SHRINK - 3;
+  A.think -= TICK; if (A.think <= 0 || !A.goal) { A.think = 0.15 + S.rnd()*0.1; pickGoal(S, s, A); }
+  const heads = []; for (const o of S.sn) if (o !== s && o.alive && Math.abs(o.x - s.x) < 26 && Math.abs(o.z - s.z) < 26) heads.push(o);
+  const fly = (ta, boost) => { let x = s.x, z = s.z, a = s.a; const v = boost ? VB : V, dt = 0.1, tr = TURN*(boost ? 0.8 : 1)*dt, wall = S.R - r - 0.7 - (closing ? 2 : 0);
+    for (let k = 1, t = dt; t <= H + 1e-9; k++, t += dt) { const d = wrap(ta - a); a += Math.max(-tr, Math.min(tr, d)); x += Math.cos(a)*v*dt; z += Math.sin(a)*v*dt;
+      if (x*x + z*z > wall*wall) return t; if (hit(g, x, z, r + 0.3, s, true)) return t;
+      for (const o of heads) { const px = o.x + Math.cos(o.a)*V*t, pz = o.z + Math.sin(o.a)*V*t, rr = r + radius(o.L) + 0.7; if ((px - x)*(px - x) + (pz - z)*(pz - z) < rr*rr) return t; } }
+    return Infinity; };
+  const want = Math.atan2(A.goal[1] - s.z, A.goal[0] - s.x);
+  let pick = want, low = 1e9, pickT = Infinity;
+  const tryA = (ta) => { const T = fly(ta, false), cost = (T === Infinity ? 0 : (H + 0.2 - T)*80) + Math.abs(wrap(ta - want))*1.2 + Math.abs(wrap(ta - s.a))*0.15; if (cost < low) { low = cost; pick = ta; pickT = T; } };
+  tryA(want); for (const off of FAN) tryA(wrap(s.a + off));
+  s.ta = wrap(pick);
+  // dash: to cut someone off or reach remains, or to get out of a closing trap, but only if the dash itself is safe
+  const canDash = s.L > LMIN + 5;
+  s.boost = canDash && ((A.boostWant && Math.abs(wrap(pick - want)) < 0.45) || pickT < H*0.6) && fly(pick, true) === Infinity;
+}
+
 // every body point, by cell, for collisions and for bots looking where they go
 const CELL = 3, HIT = { k: 0 };
 function grid(S) {
@@ -75,6 +124,7 @@ function hit(g, x, z, r, me, skipOwn) {
   return null;
 }
 
+// the first, weaker bot: kept only to measure the strong one against (test/bots.test.mjs)
 function think(S, s, g) {
   const A = s.ai; A.think -= TICK; const r = radius(s.L);
   // where would each heading take me in the next couple of seconds?
@@ -104,7 +154,7 @@ export function step(S) {
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
   S.R = q(arenaR(S.tm));
   let g = grid(S);
-  for (const s of S.sn) if (s.alive && s.bot) think(S, s, g);
+  for (const s of S.sn) if (s.alive && s.bot) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
   for (const s of S.sn) { if (!s.alive) continue;
     const boost = s.boost && s.L > LMIN, turn = TURN*(boost ? 0.8 : 1)*TICK;
