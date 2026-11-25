@@ -32,7 +32,7 @@
   .turn { position: absolute; bottom: calc(22px + env(safe-area-inset-bottom)); width: 92px; height: 92px; border-radius: 22px; pointer-events: auto; display: none; align-items: center; justify-content: center; font: 800 34px Manrope, system-ui, sans-serif; color: #fff; border: 2px solid rgba(0,240,255,.55); background: rgba(0,240,255,.1); box-shadow: 0 0 8px rgba(0,240,255,.2); touch-action: none; }
   .turn.on { background: rgba(0,240,255,.35); transform: scale(.95); }
   #tL { left: 14px; } #tR { right: 14px; }
-  body.touch .turn { display: flex; }
+
   #stick { position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(0,240,255,.45); box-shadow: 0 0 14px rgba(0,240,255,.3); display: none; }
   #stick i { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px; border-radius: 50%; background: rgba(0,240,255,.5); box-shadow: 0 0 14px var(--c); }
   #feed { position: absolute; left: 10px; top: calc(112px + env(safe-area-inset-top)); font-size: 12px; }
@@ -96,8 +96,8 @@
 
 <div class="scr hidden" id="help">
   <div class="card">
-    <p><b>Управление.</b> Кнопки ◀ ▶ в нижних углах (на компьютере — A / D или ← / →): держишь — змейка поворачивает, отпустил — едет прямо.</p>
-    <p><b>⚡ Рывок</b> — держи палец в любом месте экрана (на компьютере — W, ↑, пробел или Shift). Быстрее, но хвост тает.</p>
+    <p><b>Управление.</b> Веди пальцем в любом месте экрана — змейка поворачивает туда, куда тянешь (на компьютере — A / D или ← / →).</p>
+    <p><b>⚡ Рывок</b> — пока держишь второй палец на экране (на компьютере — W, ↑, пробел или Shift). Быстрее, но хвост тает.</p>
     <p><b>Погибаешь</b>, если врежешься головой в чужую змейку или в стену арены. Свой хвост не страшен.</p>
     <p><b>Погибшая змейка</b> рассыпается в крупные огоньки — хватай их первым.</p>
     <p><b>Примерно через минуту арена начинает сжиматься</b> — если не выбрать в меню «Арена: не сжимается». Раунд идёт, пока не останется одна змейка — она и победила.</p>
@@ -124,6 +124,6 @@
 
 <div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js?v=1.18"></script>
+<script type="module" src="./game.js?v=1.19"></script>
 </body>
 </html>

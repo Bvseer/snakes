@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.18';
+import * as G from './sim.js?v=1.19';
 
-export const VERSION = '1.18';
+export const VERSION = '1.19';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -339,8 +339,9 @@ function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1);
 function onDown(e) {
   if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
   if (e.pointerType === 'mouse') return;   // on a computer: keys only, the mouse never steers
-  // phones: ◀ ▶ in the corners steer; a finger anywhere else on the field dashes while it is down
-  if (boostId === null) { boostId = e.pointerId; boost = true; haptic('light'); }
+  // phones: the first finger steers like a joystick from where it landed; a second finger dashes while it is down
+  if (steerId === null) { src = 'touch'; sentR = 0; KH = null; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
+  else if (boostId === null) { boostId = e.pointerId; boost = true; haptic('light'); }
 }
 function onMove(e) {
   if (MODE === 'demo') return;
@@ -444,7 +445,6 @@ function setQ() { R.setPixelRatio(DPR); resize(); floorMat.uniforms.uLite.value 
 function loop(t) {
   requestAnimationFrame(loop);
   if (document.hidden) { last = t; return; }
-  if (t - last < 10) return;   // 120 Hz screens: draw every other refresh, the phone stays cool and the pace even
   const dt = Math.min(0.1, (t - last)/1000); last = t; U.time.value = t/1000;
   const t0 = performance.now();
   if (LS) { if (LS.ph === 'play') { acc += dt; let n = 0; while (acc >= G.TICK && n++ < 5) { G.step(LS); applySnap(G.snap(LS, false)); acc -= G.TICK; } if (acc > G.TICK) acc = 0; ALPHA = acc/G.TICK;
@@ -460,6 +460,6 @@ function loop(t) {
 
 // start: the menu over a live arena of bots, or straight into a room from a link
 if (TG) { try { TG.ready(); TG.expand(); if (TG.disableVerticalSwipes) TG.disableVerticalSwipes(); TG.setHeaderColor && TG.setHeaderColor('#04050c'); TG.setBackgroundColor && TG.setBackgroundColor('#04050c'); } catch (e) {} }
-$('ver').textContent = 'v' + VERSION; newLocal(false); show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
+$('ver').textContent = 'v' + VERSION; newLocal(false); burst(0, 0, 0xffffff, 1); try { R.compile(scene, cam); } catch (e) {} show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
 const sp = zt().start || (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '', rm = /^r_([a-z0-9]{6,12})$/.exec(sp); if (rm && initStr()) netJoin(rm[1]);
 window.__LS = () => LS; window.__pred = () => PRED; window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
