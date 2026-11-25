@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.19';
+import * as G from './sim.js?v=1.20';
 
-export const VERSION = '1.19';
+export const VERSION = '1.20';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -15,42 +15,48 @@ const haptic = (k) => { try { TG && TG.HapticFeedback && TG.HapticFeedback.impac
 const canvas = $('gl');
 const HIDPI = (window.devicePixelRatio || 1) >= 2;
 const R = new THREE.WebGLRenderer({ canvas, antialias: !HIDPI, powerPreference: 'high-performance' });
-R.setClearColor(0x04050c); R.outputColorSpace = THREE.SRGBColorSpace;
-let DPR = Math.min(window.devicePixelRatio || 1, 1.5); R.setPixelRatio(DPR);
-const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x04050c, 70, 150);
+R.setClearColor(0x04060e); R.outputColorSpace = THREE.SRGBColorSpace;
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+let DPR = Math.min(window.devicePixelRatio || 1, TOUCH ? 1.35 : 1.5); R.setPixelRatio(DPR);
+const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x04060e, 55, 120);
 const cam = new THREE.PerspectiveCamera(50, 1, 0.5, 400);
 function resize() { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w/h; cam.fov = w < h ? 64 : 48; cam.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 const U = { time: { value: 0 } };
 
 // the floor: a grid that glows under every head, a ring where the arena ends
-const HEADS = 6;
-const floorMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.time, uR: { value: G.R0 }, uWarn: { value: 0 }, uLite: { value: 1 } },
+const HEADS = 6, FLOOR_R = G.R0 + 34;
+// The floor costs nothing per pixel: the background is the clear colour, the grid is thin strips of geometry
+// (only the pixels they cover are drawn), and the edge is a narrow ring plus a dark skirt outside it.
+function gridMesh() {
+  const pos = [], col = [], E = FLOOR_R, add = (x0, z0, x1, z1, w, c) => { const dx = x1 - x0, dz = z1 - z0, l = Math.hypot(dx, dz), nx = -dz/l*w/2, nz = dx/l*w/2;
+    const v = [[x0 + nx, z0 + nz], [x0 - nx, z0 - nz], [x1 + nx, z1 + nz], [x1 - nx, z1 - nz]]; for (const k of [0, 1, 2, 2, 1, 3]) { pos.push(v[k][0], 0, v[k][1]); col.push(c[0], c[1], c[2]); } };
+  for (let k = -Math.floor(E/2)*2; k <= E; k += 2) { const major = k % 10 === 0, half = Math.sqrt(Math.max(0, E*E - k*k)); if (half < 1) continue; const w = major ? 0.09 : 0.05, c = major ? [0, 0.075, 0.11] : [0, 0.03, 0.05];
+    add(k, -half, k, half, w, c); add(-half, k, half, k, w, c); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, fog: true, side: THREE.DoubleSide }));
+}
+const floor = gridMesh(); floor.position.y = -0.01; scene.add(floor);
+// the edge line with a soft glow outwards, and everything beyond it dimmed
+const floorMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  uniforms: { uR: { value: G.R0 }, uWarn: { value: 0 } },
   vertexShader: `varying vec2 vP; void main(){ vec4 w = modelMatrix*vec4(position,1.); vP = w.xz; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `uniform float uTime, uR, uWarn, uLite; varying vec2 vP;
-    float line(vec2 p, float s){ vec2 q = p/s; vec2 g = abs(fract(q-.5)-.5)/fwidth(q); return 1.-min(min(g.x,g.y),1.); }
-    void main(){
-      float d = length(vP), inside = smoothstep(uR+.25, uR-.25, d);
-      vec3 ringC = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn);
-      float g = line(vP, 10.)*.18 + (uLite > .5 ? line(vP, 2.)*.08 : 0.);
-      vec3 c = vec3(.015,.02,.05) + mix(vec3(.25,.03,.06), vec3(0.,.55,.8), inside)*g*(inside*.9+.25) + vec3(.0,.02,.05)*inside;
-      float dr = d-uR; c += ringC*(smoothstep(.22,.0,abs(dr))*.9 + exp(-abs(dr)*3.5)*.22*(dr > 0. ? 1. : .5))*(.85+.15*sin(uTime*4.));
-      c *= 1.-smoothstep(uR+8., uR+45., d)*.85;
-      gl_FragColor = vec4(c,1.);
-    }`,
-});
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(420, 420), floorMat); floor.rotation.x = -Math.PI/2; scene.add(floor);
+  fragmentShader: `uniform float uR, uWarn; varying vec2 vP; void main(){ float dr = length(vP)-uR;
+    float line = smoothstep(.22,.0,abs(dr))*.9 + exp(-abs(dr)*3.5)*.22*step(0.,dr), dim = smoothstep(0.,.6,dr)*.75;
+    gl_FragColor = vec4(mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn)*line, dim); }` });
+let edgeR = -1; const edge = new THREE.Mesh(new THREE.RingGeometry(1, 2, 8, 1), floorMat); edge.rotation.x = -Math.PI/2; edge.position.y = 0.005; edge.renderOrder = 1; scene.add(edge);
+function edgeAt(r) { if (Math.abs(r - edgeR) < 0.02) return; edgeR = r; edge.geometry.dispose(); edge.geometry = new THREE.RingGeometry(Math.max(0.1, r - 0.6), FLOOR_R + 1, 128, 1); }
+edgeAt(G.R0);
 
 // the wall of light around the arena
 const wallMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
   uniforms: { uTime: U.time, uWarn: { value: 0 } },
   vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
   fragmentShader: `uniform float uTime, uWarn; varying vec2 vU; void main(){ float a = pow(1.-vU.y, 2.2)*.4; a *= .75+.25*sin(vU.x*300.-uTime*3.); vec3 c = mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn); gl_FragColor = vec4(c*a, 1.); }` });
-const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.2, 160, 1, true), wallMat); wall.position.y = 1.1; scene.add(wall);
+const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.2, 96, 1, true), wallMat); wall.position.y = 1.1; scene.add(wall);
 
 // ---- snakes: a lit neon tube each, built fresh from the body points every frame ----
-const MAXPT = 720, RING = 10;
+const MAXPT = 720, RING = 8;
 const tubeVS = `attribute float aU; varying vec3 vN, vV, vW; varying float vU;
   void main(){ vU = aU; vW = normal; vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalMatrix*normal; vV = -mv.xyz; gl_Position = projectionMatrix*mv; }`;
 const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade; varying vec3 vN, vV, vW; varying float vU;
@@ -237,10 +243,13 @@ function buildTube(v, s, hx, hz, L, r, pre) {
       P[o] = PX[i] + nx*rr; P[o + 1] = cy + sn*rr; P[o + 2] = PZ[i] + nz*rr; N[o] = nx; N[o + 1] = sn; N[o + 2] = nz; A[i*RING + q] = PU[i]; }
   }
   v.g.setDrawRange(0, Math.max(0, n - 1)*RING*6);
-  v.g.attributes.position.needsUpdate = v.g.attributes.normal.needsUpdate = v.g.attributes.aU.needsUpdate = true;
+  // send the GPU only the vertices in use, not the whole 720-point buffer
+  const at = v.g.attributes; for (const [a, k] of [[at.position, 3], [at.normal, 3], [at.aU, 1]]) { a.clearUpdateRanges(); a.addUpdateRange(0, n*RING*k); a.needsUpdate = true; }
   return n;
 }
 const COS = Array.from({ length: RING }, (_, q) => Math.cos(q/RING*Math.PI*2)), SIN = Array.from({ length: RING }, (_, q) => Math.sin(q/RING*Math.PI*2));
+function upd(geo, n) { const a = geo.attributes; for (const [x, k] of [[a.position, 3], [a.color, 3], [a.size, 1]]) { x.clearUpdateRanges(); x.addUpdateRange(0, Math.max(1, n)*k); x.needsUpdate = true; } }
+let spLast = 0;
 let gi = 0; const GP = glowG.attributes.position.array, GC = glowG.attributes.color.array, GS = glowG.attributes.size.array;
 function glowAt(x, y, z, col, size) { if (gi >= GLOWN) return; GP[gi*3] = x; GP[gi*3 + 1] = y; GP[gi*3 + 2] = z; GC[gi*3] = col.r; GC[gi*3 + 1] = col.g; GC[gi*3 + 2] = col.b; GS[gi] = size; gi++; }
 
@@ -249,7 +258,7 @@ function near(s) { const reach = camH*1.3 + s.L*G.SEG + 4; return Math.abs(s.x -
 const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); let camH = 30, follow = -1;
 function drawWorld(dt) {
   const al = ALPHA;
-  floorMat.uniforms.uR.value = M.R; wall.scale.set(M.R, 1, M.R);
+  floorMat.uniforms.uR.value = M.R; edgeAt(M.R); wall.scale.set(M.R, 1, M.R);
   const warn = !M.fixed && M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
   gi = 0; ei = 0;
   HEAD.ok = false;
@@ -268,26 +277,26 @@ function drawWorld(dt) {
     for (let k = 0; k < 2; k++) { const side = k ? 1 : -1, ex = hx + fx*hr*0.45 + sx*side*hr*0.5, ez = hz + fz*hr*0.45 + sz*side*hr*0.5, ey = r*0.95 + hr*0.55, a = hr*0.34, b = hr*0.19;
       eyeM.makeScale(a, a, a).setPosition(ex, ey, ez); EYEW.setMatrixAt(ei, eyeM); eyeM.makeScale(b, b, b).setPosition(ex + fx*hr*0.17, ey + hr*0.08, ez + fz*hr*0.17); EYEB.setMatrixAt(ei, eyeM); ei++; }
     tmpC.setHex(col);
-    if (QL > 0) for (let k = 2; k < np; k += 5) glowAt(PX[k], 0.3, PZ[k], tmpC, r*7*(1 - k/np*0.5));
-    glowAt(hx, 0.2, hz, tmpC, r*14);
+    if (QL > 0) for (let k = 3; k < np; k += 7) glowAt(PX[k], 0.3, PZ[k], tmpC, r*6*(1 - k/np*0.5));
+    glowAt(hx, 0.2, hz, tmpC, r*11);
     if (s.boosting && Math.random() < (QL > 0 ? 0.6 : 0.25)) spark(PX[np - 1], r, PZ[np - 1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45);
     if (MODE !== 'demo' && s.id !== ME) { if (!v.tag || v.tagName !== s.name) { if (v.tag) scene.remove(v.tag); v.tag = label(s.name, col); v.tagName = s.name; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + 2.2, hz); }
   });
   for (let i = M.sn.length; i < VIS.length; i++) { const v = VIS[i]; if (!v) continue; v.body.visible = v.head.visible = false; if (v.tag) v.tag.visible = false; }
   EYEW.count = EYEB.count = ei; EYEW.instanceMatrix.needsUpdate = EYEB.instanceMatrix.needsUpdate = true;
-  glowG.setDrawRange(0, gi); glowG.attributes.position.needsUpdate = glowG.attributes.color.needsUpdate = glowG.attributes.size.needsUpdate = true;
+  glowG.setDrawRange(0, gi); upd(glowG, gi);
 
   // food
   if (M.fv !== foodV) { foodV = M.fv;
   let fi = 0; const FP = foodG.attributes.position.array, FC = foodG.attributes.color.array, FS = foodG.attributes.size.array;
   for (const [id, f] of M.food) { if (fi >= FOODN) break; FP[fi*3] = f[0]; FP[fi*3 + 1] = 0.35 + f[2]*0.12; FP[fi*3 + 2] = f[1]; tmpC.setHex(G.COLORS[id % G.COLORS.length]); FC[fi*3] = tmpC.r; FC[fi*3 + 1] = tmpC.g; FC[fi*3 + 2] = tmpC.b; FS[fi] = 2.2 + f[2]*1.6; fi++; }
-  foodG.setDrawRange(0, fi); foodG.attributes.position.needsUpdate = foodG.attributes.color.needsUpdate = foodG.attributes.size.needsUpdate = true; }
+  foodG.setDrawRange(0, fi); upd(foodG, fi); }
 
   // sparks
   const SPp = spG.attributes.position.array, SPc = spG.attributes.color.array, SPs = spG.attributes.size.array; let si = 0;
   for (let k = SP.length - 1; k >= 0; k--) { const p = SP[k]; p.life -= dt; if (p.life <= 0) { SP[k] = SP[SP.length - 1]; SP.pop(); continue; } p.vy -= 18*dt; p.x += p.vx*dt; p.y = Math.max(0.1, p.y + p.vy*dt); p.z += p.vz*dt; p.vx *= 0.97; p.vz *= 0.97;
     const f = p.life/p.max; SPp[si*3] = p.x; SPp[si*3 + 1] = p.y; SPp[si*3 + 2] = p.z; SPc[si*3] = p.r*f; SPc[si*3 + 1] = p.g*f; SPc[si*3 + 2] = p.b*f; SPs[si] = p.size; si++; }
-  spG.setDrawRange(0, si); spG.attributes.position.needsUpdate = spG.attributes.color.needsUpdate = spG.attributes.size.needsUpdate = true;
+  spG.setDrawRange(0, si); if (si || spLast) upd(spG, si); spLast = si;
 
   // the camera follows you; once you are out, whoever is longest
   const me = meS(); let tgt = me && me.alive ? me : null;
@@ -440,8 +449,8 @@ $('again').onclick = () => { aim = null; if (MODE === 'net') { if (NET && NET.ws
 
 // ---- the loop: fixed-step rules, free-running pictures, and a speed check ----
 const PROF = { draw: 0, render: 0 };
-let last = performance.now(), fpsT = 0, frames = 0, msSum = 0, QL = 1;
-function setQ() { R.setPixelRatio(DPR); resize(); floorMat.uniforms.uLite.value = QL; }
+let last = performance.now(), fpsT = 0, frames = 0, msSum = 0, QL = 1; const FT = [];
+function setQ() { R.setPixelRatio(DPR); resize(); }
 function loop(t) {
   requestAnimationFrame(loop);
   if (document.hidden) { last = t; return; }
@@ -451,15 +460,16 @@ function loop(t) {
       const ms = LS.sn.find((v) => v.id === 'me'); if (ms && n) setAuth(ms.x, ms.z, ms.a, ms.L, ms.alive, performance.now() - acc*1000, LS.tm); } else ALPHA = 1;
     if (MODE === 'demo' && LS.ph === 'over') { if (!LS.endAt) LS.endAt = t; else if (t - LS.endAt > 2500) newLocal(false); } }
   netPlay(dt); controls(dt); predFrame(dt); const tA = performance.now(); drawWorld(dt); const tB = performance.now(); hud(dt); R.render(scene, cam); const tC = performance.now(); PROF.draw = PROF.draw*0.95 + (tB - tA)*0.05; PROF.render = PROF.render*0.95 + (tC - tB)*0.05;
-  // too slow for this phone? fewer pixels first, then fewer effects. Only ever downwards, so it never hitches back and forth.
-  msSum += performance.now() - t0; frames++; fpsT += dt;
-  if (fpsT > 2) { const fps = frames/fpsT;
-    if (fps < 50) { if (DPR > 1) { DPR = Math.max(1, DPR - 0.25); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
-    window.__fps = fps; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; }
+  // too slow for this phone? Judge by frames that came late compared with this screen's own pace (60, 90 or 120 Hz):
+  // fewer pixels first, then fewer effects. Only ever downwards, so it never hitches back and forth.
+  msSum += performance.now() - t0; frames++; fpsT += dt; FT.push(dt);
+  if (fpsT > 2) { FT.sort((a, b) => a - b); const base = FT[Math.floor(FT.length*0.2)], late = FT.filter((d) => d > base*1.6).length/FT.length;
+    if (late > 0.08 && !window.__noAdapt) { if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
+    window.__fps = frames/fpsT; window.__late = late; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; FT.length = 0; }
 }
 
 // start: the menu over a live arena of bots, or straight into a room from a link
 if (TG) { try { TG.ready(); TG.expand(); if (TG.disableVerticalSwipes) TG.disableVerticalSwipes(); TG.setHeaderColor && TG.setHeaderColor('#04050c'); TG.setBackgroundColor && TG.setBackgroundColor('#04050c'); } catch (e) {} }
 $('ver').textContent = 'v' + VERSION; newLocal(false); burst(0, 0, 0xffffff, 1); try { R.compile(scene, cam); } catch (e) {} show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
 const sp = zt().start || (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '', rm = /^r_([a-z0-9]{6,12})$/.exec(sp); if (rm && initStr()) netJoin(rm[1]);
-window.__LS = () => LS; window.__pred = () => PRED; window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
+window.__hide = (k) => { const o = { floor, wall, glow, food: foodPts, sparks: spPts }[k]; if (o) o.visible = false; if (k === 'snakes') VIS.forEach((v) => v && (v.body.material.visible = false)); if (k === 'hud') document.getElementById('hud').style.display = 'none'; }; window.__fixDpr = (d) => { DPR = d; QL = 1; R.setPixelRatio(d); resize(); window.__noAdapt = true; }; window.__GL = { R, scene, cam, floor, glow, foodPts, spPts, VIS, THREE }; window.__LS = () => LS; window.__pred = () => PRED; window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
