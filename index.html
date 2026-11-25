@@ -85,6 +85,7 @@
   <div class="sub">Ешь огоньки, расти и заставляй других врезаться в твой хвост. Последний живой — победитель.</div>
   <button class="b" id="goSolo">🐍 Играть с ботами</button>
   <button class="b m" id="goNet">👥 С друзьями</button>
+  <button class="b q" id="goArena">🎯 Арена: сжимается</button>
   <button class="b q" id="goHelp">Как играть</button>
 </div>
 
@@ -94,7 +95,8 @@
     <p><b>⚡ Рывок</b> — кнопка справа, второй палец, W, ↑, пробел или Shift. Быстрее, но хвост тает.</p>
     <p><b>Погибаешь</b>, если врежешься головой в чужую змейку или в стену арены. Свой хвост не страшен.</p>
     <p><b>Погибшая змейка</b> рассыпается в крупные огоньки — хватай их первым.</p>
-    <p><b>Примерно через минуту арена начинает сжиматься.</b> Раунд идёт, пока не останется одна змейка — она и победила.</p>
+    <p><b>Примерно через минуту арена начинает сжиматься</b> — если не выбрать в меню «Арена: не сжимается». Раунд идёт, пока не останется одна змейка — она и победила.</p>
+    <p><b>Окружи</b> змейку своим телом и сожми кольцо — ей некуда будет деться.</p>
   </div>
   <button class="b" id="helpBack">Понятно</button>
 </div>
@@ -102,6 +104,7 @@
 <div class="scr hidden" id="lobby">
   <h1 class="t" style="font-size:34px"><span class="neon">КОМНАТА</span></h1>
   <div class="card"><p id="lWho">Подключаюсь…</p><div id="lList"></div></div>
+  <button class="b q" id="lArena">🎯 Арена: сжимается</button>
   <button class="b" id="lStart">▶ Начать</button>
   <button class="b m" id="lInvite">📨 Позвать друзей</button>
   <button class="b q" id="lLeave">Выйти</button>
@@ -116,6 +119,6 @@
 
 <div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js?v=1.15"></script>
+<script type="module" src="./game.js?v=1.16"></script>
 </body>
 </html>

@@ -14,8 +14,8 @@ const wrap = (a) => { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a
 // seeded random so a solo round and its replay agree; the server seeds from the clock
 export function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s/4294967296; }; }
 
-export function newGame(seed) {
-  return { tm: -3, ph: 'play', R: R0, rnd: rng(seed || Date.now()), sn: [], food: [], fid: 1, ev: [], fa: [], fr: [], deaths: 0, humans: 0 };
+export function newGame(seed, opt) {
+  return { fixed: !!(opt && opt.fixed), tm: -3, ph: 'play', R: R0, rnd: rng(seed || Date.now()), sn: [], food: [], fid: 1, ev: [], fa: [], fr: [], deaths: 0, humans: 0 };
 }
 
 // the body: points SEG apart behind the head. Same inputs give the same points on every machine.
@@ -87,11 +87,11 @@ function pickGoal(S, s, A) {
   let bs = -1; for (const c of cells.values()) { const x = c[1]/c[0], z = c[2]/c[0], d = Math.hypot(x - s.x, z - s.z), ahead = Math.cos(Math.atan2(z - s.z, x - s.x) - s.a);
     const sc = c[0]/(d + 5)*(1.15 + 0.35*ahead)*(Math.hypot(x, z) > S.R - 4 ? 0.2 : 1); if (sc > bs) { bs = sc; best = [x, z]; } }
   // 4. the wall is closing in: stay towards the middle
-  if (S.tm > SHRINK - 5 && Math.hypot(s.x, s.z) > S.R*0.65) best = [s.x*0.3, s.z*0.3];
+  if (!S.fixed && S.tm > SHRINK - 5 && Math.hypot(s.x, s.z) > S.R*0.65) best = [s.x*0.3, s.z*0.3];
   A.goal = best || [-s.x*0.3, -s.z*0.3];
 }
 function think2(S, s, g) {
-  const A = s.ai, r = radius(s.L), H = 0.8 + A.skill*0.6, closing = S.tm > SHRINK - 3;
+  const A = s.ai, r = radius(s.L), H = 0.8 + A.skill*0.6, closing = !S.fixed && S.tm > SHRINK - 3;
   A.think -= TICK; if (A.think <= 0 || !A.goal) { A.think = 0.15 + S.rnd()*0.1; pickGoal(S, s, A); }
   const heads = []; for (const o of S.sn) if (o !== s && o.alive && Math.abs(o.x - s.x) < 26 && Math.abs(o.z - s.z) < 26) heads.push(o);
   const fly = (ta, boost) => { let x = s.x, z = s.z, a = s.a; const v = boost ? VB : V, dt = 0.1, tr = TURN*(boost ? 0.8 : 1)*dt, wall = S.R - r - 0.7 - (closing ? 2 : 0);
@@ -152,7 +152,7 @@ export function step(S) {
   S.ev = []; S.fa = []; S.fr = [];
   if (S.ph !== 'play') return;
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
-  S.R = q(arenaR(S.tm));
+  S.R = S.fixed ? R0 : q(arenaR(S.tm));   // fixed: the arena never closes in
   let g = grid(S);
   for (const s of S.sn) if (s.alive && s.bot) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
@@ -208,15 +208,15 @@ export function snap(S, full) {
   const o = { tm: Math.round(S.tm*20), R: S.R, sn: S.sn.map((s) => [s.i, Math.round(s.x*100), Math.round(s.z*100), Math.round(s.a*100), Math.round(s.L*100), (s.alive ? 1 : 0) | (s.boosting ? 2 : 0)]), ev: S.ev };
   if (S.fa.length) o.fa = S.fa.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]);
   if (S.fr.length) o.fr = S.fr;
-  if (full) { o.full = 1; o.ph = S.ph; o.who = S.sn.map((s) => [s.id, s.name, s.bot ? 1 : 0, s.col]); o.tr = S.sn.map((s) => s.tr.map((p) => [Math.round(p[0]*100), Math.round(p[1]*100)])); o.food = S.food.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]); }
+  if (full) { o.full = 1; o.fixed = S.fixed ? 1 : 0; o.ph = S.ph; o.who = S.sn.map((s) => [s.id, s.name, s.bot ? 1 : 0, s.col]); o.tr = S.sn.map((s) => s.tr.map((p) => [Math.round(p[0]*100), Math.round(p[1]*100)])); o.food = S.food.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]); }
   if (S.ph === 'over') { o.ph = 'over'; o.res = results(S); }
   return o;
 }
 
 // a phone's copy of the world, kept up to date from snapshots
-export function mirror() { return { tm: 0, R: R0, ph: 'play', sn: [], food: new Map(), ready: false, res: null }; }
+export function mirror() { return { fixed: false, tm: 0, R: R0, ph: 'play', sn: [], food: new Map(), ready: false, res: null }; }
 export function apply(M, o) {
-  if (o.full) { M.ready = true; const old = M.sn; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, pL: L0, n: old[i] && old[i].id === w[0] ? old[i].n || 0 : 0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, px: 0, pz: 0 }));
+  if (o.full) { M.ready = true; M.fixed = !!o.fixed; const old = M.sn; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, pL: L0, n: old[i] && old[i].id === w[0] ? old[i].n || 0 : 0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, px: 0, pz: 0 }));
     M.food = new Map(); for (const f of o.food) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]); }
   if (!M.ready) return [];
   M.tm = o.tm/20; M.R = o.R; if (o.ph) M.ph = o.ph; if (o.res) M.res = o.res;

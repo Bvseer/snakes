@@ -31,9 +31,9 @@ async function tg(env, method, body) { try { return await (await fetch('https://
 
 // ---- one room -------------------------------------------------------------
 export class Room {
-  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.ph = 'lobby'; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; }
+  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.ph = 'lobby'; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; this.fixed = false; }
   people() { return [...this.socks.values()].filter((v, i, a) => a.findIndex((w) => w.id === v.id) === i); }
-  lobby() { return { t: 'lobby', ph: this.ph, players: this.people().map((p) => ({ id: p.id, name: p.name })) }; }
+  lobby() { return { t: 'lobby', ph: this.ph, fixed: this.fixed, players: this.people().map((p) => ({ id: p.id, name: p.name })) }; }
   send(ws, o) { try { ws.send(typeof o === 'string' ? o : JSON.stringify(o)); } catch (e) {} }
   all(o) { const s = typeof o === 'string' ? o : JSON.stringify(o); for (const ws of this.socks.keys()) this.send(ws, s); }
   async fetch(request) {
@@ -56,6 +56,7 @@ export class Room {
     const me = this.socks.get(ws); if (!me || typeof data !== 'string' || data.length > 300) return; me.seen = Date.now(); let m; try { m = JSON.parse(data); } catch (e) { return; }
     if (m.t === 'in' && this.ph === 'play' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
     else if (m.t === 'start' && this.ph !== 'play') this.start();
+    else if (m.t === 'opt' && this.ph !== 'play') { this.fixed = !!m.fixed; this.all(this.lobby()); }
     else if (m.t === 'ping') this.send(ws, { t: 'pong', k: +m.k || 0 });
   }
   leave(ws) { const me = this.socks.get(ws); if (!me) return; this.socks.delete(ws);
@@ -65,7 +66,7 @@ export class Room {
   // a phone that has gone quiet for 45 s is gone, even if its connection never said so (phones ping every 20 s)
   sweepOn() { if (this.sweeper) return; this.sweeper = setInterval(() => { const t = Date.now(); for (const [ws, v] of this.socks) if (t - v.seen > 45000) { try { ws.close(4001, 'quiet'); } catch (e) {} this.leave(ws); } }, 10000); }
   start() {
-    const S = G.newGame(Date.now() & 0x7fffffff); for (const p of this.people()) G.addSnake(S, p.id, p.name, false); G.fillBots(S);
+    const S = G.newGame(Date.now() & 0x7fffffff, { fixed: this.fixed }); for (const p of this.people()) G.addSnake(S, p.id, p.name, false); G.fillBots(S);
     this.S = S; this.ph = 'play'; this.k = 0; this.acc = 0; this.last = Date.now();
     this.all(this.lobby()); this.all({ t: 's', s: G.snap(S, true) }); this.run();
   }

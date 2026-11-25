@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.15';
+import * as G from './sim.js?v=1.16';
 
-export const VERSION = '1.15';
+export const VERSION = '1.16';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -146,6 +146,9 @@ function slurp(big) {
 for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }, { passive: true });
 
 // ---- the game being shown --------------------------------------------------
+// the arena setting for solo play, remembered on this phone
+let FIXED = false; try { FIXED = localStorage.getItem('fixed') === '1'; } catch (e) {}
+function arenaLabel(f) { return f ? '⭕ Арена: не сжимается' : '🎯 Арена: сжимается'; }
 let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
 let MODE = 'demo', LS = null, M = G.mirror(), ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
 function applySnap(o) {
@@ -156,7 +159,7 @@ function applySnap(o) {
   if (M.ph === 'play' && o.full && o.tm <= 0 && MODE !== 'demo') { overShown = false; show(null); $('hud').classList.add('on'); }
 }
 function newLocal(withMe) {
-  LS = G.newGame((Math.random()*1e9) | 0); if (withMe) G.addSnake(LS, 'me', 'Ты', false); G.fillBots(LS); if (!withMe) LS.tm = 0;
+  LS = G.newGame((Math.random()*1e9) | 0, { fixed: withMe && FIXED }); if (withMe) G.addSnake(LS, 'me', 'Ты', false); G.fillBots(LS); if (!withMe) LS.tm = 0;
   M = G.mirror(); ME = withMe ? 'me' : null; acc = 0; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; $('feed').innerHTML = ''; lastCount = 99; applySnap(G.snap(LS, true));
 }
 const meS = () => M.sn.find((s) => s.id === ME);
@@ -247,7 +250,7 @@ const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); le
 function drawWorld(dt) {
   const al = ALPHA;
   floorMat.uniforms.uR.value = M.R; wall.scale.set(M.R, 1, M.R);
-  const warn = M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
+  const warn = !M.fixed && M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
   gi = 0; ei = 0;
   HEAD.ok = false;
   M.sn.forEach((s, i) => {
@@ -387,7 +390,7 @@ function netMsg(N, m) {
   if (m.t === 'hello') { N.me = m.me; ME = m.me; }
   else if (m.t === 'pong') { if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
-  else if (m.t === 'lobby') { N.players = m.players;
+  else if (m.t === 'lobby') { N.players = m.players; N.fixed = !!m.fixed; $('lArena').textContent = arenaLabel(N.fixed);
     const bots = Math.max(0, G.MAXS - m.players.length);
     $('lList').innerHTML = m.players.map((p) => '<span>' + (p.id === N.me ? '⭐ ' : '') + esc(p.name) + '</span>').join('') + (bots ? '<span class="bot">🤖 ×' + bots + '</span>' : '');
     $('lWho').textContent = m.players.length < 2 ? 'Пока ты один. Позови друзей — или начинай с ботами.' : 'В комнате ' + m.players.length + ' из ' + G.MAXS + '. Свободные места займут боты. Начать может любой.';
@@ -423,6 +426,9 @@ function goHome() { netLeave(); MODE = 'demo'; ME = null; $('hud').classList.rem
 
 $('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; sentA = 99; sentR = 0; src = null; KH = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
 $('goNet').onclick = netNew;
+$('goArena').textContent = arenaLabel(FIXED);
+$('goArena').onclick = () => { FIXED = !FIXED; try { localStorage.setItem('fixed', FIXED ? '1' : '0'); } catch (e) {} $('goArena').textContent = arenaLabel(FIXED); haptic('light'); };
+$('lArena').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'opt', fixed: !NET.fixed })); };
 $('goHelp').onclick = () => show('help'); $('helpBack').onclick = () => show('home');
 $('lStart').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); };
 $('lInvite').onclick = netInvite; $('lLeave').onclick = goHome; $('toHome').onclick = goHome;
