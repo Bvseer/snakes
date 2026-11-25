@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.17';
+import * as G from './sim.js?v=1.18';
 
-export const VERSION = '1.17';
+export const VERSION = '1.18';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -339,7 +339,8 @@ function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1);
 function onDown(e) {
   if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
   if (e.pointerType === 'mouse') return;   // on a computer: keys only, the mouse never steers
-  // phones steer with the ◀ ▶ buttons only; touching the field does nothing
+  // phones: ◀ ▶ in the corners steer; a finger anywhere else on the field dashes while it is down
+  if (boostId === null) { boostId = e.pointerId; boost = true; haptic('light'); }
 }
 function onMove(e) {
   if (MODE === 'demo') return;
