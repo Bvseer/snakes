@@ -26,12 +26,16 @@
   #board { position: absolute; top: calc(50px + env(safe-area-inset-top)); right: 10px; font-size: 12px; text-align: right; opacity: .9; }
   #board div { margin: 2px 0; white-space: nowrap; } #board i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; box-shadow: 0 0 6px currentColor; background: currentColor; }
   #board .me { font-weight: 800; color: #fff; } #board .dead { opacity: .35; text-decoration: line-through; }
-  #mini { position: absolute; left: 10px; bottom: calc(12px + env(safe-area-inset-bottom)); width: 92px; height: 92px; border-radius: 50%; background: rgba(8,12,28,.55); border: 1px solid rgba(0,240,255,.3); }
+  #mini { position: absolute; left: 10px; top: calc(10px + env(safe-area-inset-top)); width: 92px; height: 92px; border-radius: 50%; background: rgba(8,12,28,.55); border: 1px solid rgba(0,240,255,.3); }
   #boost { position: absolute; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); width: 78px; height: 78px; border-radius: 50%; pointer-events: auto; border: 2px solid var(--m); background: radial-gradient(circle, rgba(255,43,214,.35), rgba(255,43,214,.08) 70%); box-shadow: 0 0 8px rgba(255,43,214,.3); color: #fff; font: 800 13px Manrope, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; flex-direction: column; }
   #boost b { font-size: 26px; line-height: 1; } #boost.on { transform: scale(.94); background: radial-gradient(circle, rgba(255,43,214,.75), rgba(255,43,214,.2) 70%); }
+  .turn { position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); width: 84px; height: 84px; border-radius: 22px; pointer-events: auto; display: none; align-items: center; justify-content: center; font: 800 34px Manrope, system-ui, sans-serif; color: #fff; border: 2px solid rgba(0,240,255,.55); background: rgba(0,240,255,.1); box-shadow: 0 0 8px rgba(0,240,255,.2); touch-action: none; }
+  .turn.on { background: rgba(0,240,255,.35); transform: scale(.95); }
+  #tL { left: 14px; } #tR { left: 110px; }
+  body.touch .turn { display: flex; }
   #stick { position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(0,240,255,.45); box-shadow: 0 0 14px rgba(0,240,255,.3); display: none; }
   #stick i { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px; border-radius: 50%; background: rgba(0,240,255,.5); box-shadow: 0 0 14px var(--c); }
-  #feed { position: absolute; left: 10px; top: calc(52px + env(safe-area-inset-top)); font-size: 12px; }
+  #feed { position: absolute; left: 10px; top: calc(112px + env(safe-area-inset-top)); font-size: 12px; }
   #feed div { margin: 3px 0; padding: 3px 8px; border-radius: 8px; background: rgba(8,12,28,.55); animation: fade 3.2s forwards; }
   @keyframes fade { 0%, 80% { opacity: 1 } 100% { opacity: 0 } }
   #big { z-index: 2; position: fixed; left: 0; right: 0; top: 34%; text-align: center; font-size: 46px; pointer-events: none; opacity: 0; transition: opacity .25s, transform .25s; transform: scale(.9); }
@@ -75,6 +79,7 @@
   <div id="feed"></div>
   <canvas id="mini" width="184" height="184"></canvas>
   <div id="stick"><i></i></div>
+  <div class="turn" id="tL">◀</div><div class="turn" id="tR">▶</div>
   <div id="boost"><b>⚡</b>рывок</div>
 </div>
 <div id="big" class="t neon"></div>
@@ -91,8 +96,8 @@
 
 <div class="scr hidden" id="help">
   <div class="card">
-    <p><b>Управление.</b> Веди пальцем в любом месте экрана — змейка повернёт туда. На компьютере — A / D или ← / →: поворот, пока держишь клавишу.</p>
-    <p><b>⚡ Рывок</b> — кнопка справа, второй палец, W, ↑, пробел или Shift. Быстрее, но хвост тает.</p>
+    <p><b>Управление.</b> Кнопки ◀ ▶ внизу слева (на компьютере — A / D или ← / →): держишь — змейка поворачивает, отпустил — едет прямо.</p>
+    <p><b>⚡ Рывок</b> — кнопка справа (на компьютере — W, ↑, пробел или Shift). Быстрее, но хвост тает.</p>
     <p><b>Погибаешь</b>, если врежешься головой в чужую змейку или в стену арены. Свой хвост не страшен.</p>
     <p><b>Погибшая змейка</b> рассыпается в крупные огоньки — хватай их первым.</p>
     <p><b>Примерно через минуту арена начинает сжиматься</b> — если не выбрать в меню «Арена: не сжимается». Раунд идёт, пока не останется одна змейка — она и победила.</p>
@@ -119,6 +124,6 @@
 
 <div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js?v=1.16"></script>
+<script type="module" src="./game.js?v=1.17"></script>
 </body>
 </html>

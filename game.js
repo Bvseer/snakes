@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.16';
+import * as G from './sim.js?v=1.17';
 
-export const VERSION = '1.16';
+export const VERSION = '1.17';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -331,7 +331,7 @@ function showOver() {
 
 // ---- controls: drag anywhere to steer, a second finger or the button to dash ----
 // Directions are measured on the floor, not on the glass: the camera looks down at an angle.
-let sentR = 0;
+let sentR = 0; const keys = {};
 let aim = null, boost = false, steerId = null, boostId = null, ox = 0, oy = 0, sentA = 99, sentB = false, sentT = 0, src = null, mouse = null;
 const stick = $('stick'), knob = stick.firstElementChild, ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitP = new THREE.Vector3();
 const HEAD = { x: 0, z: 0, ok: false };
@@ -339,8 +339,7 @@ function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1);
 function onDown(e) {
   if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
   if (e.pointerType === 'mouse') return;   // on a computer: keys only, the mouse never steers
-  if (steerId === null) { src = 'touch'; sentR = 0; KH = null; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
-  else if (boostId === null) { boostId = e.pointerId; boost = true; }
+  // phones steer with the ◀ ▶ buttons only; touching the field does nothing
 }
 function onMove(e) {
   if (MODE === 'demo') return;
@@ -356,16 +355,19 @@ function onUp(e) {
 }
 addEventListener('pointerdown', onDown); addEventListener('pointermove', onMove); addEventListener('pointerup', onUp); addEventListener('pointercancel', onUp);
 addEventListener('blur', () => { boost = false; for (const k in keys) keys[k] = false; });
+if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) document.body.classList.add('touch');
+for (const [id, code] of [['tL', 'TouchL'], ['tR', 'TouchR']]) { const el = $(id);
+  el.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); keys[code] = true; el.classList.add('on'); haptic('light'); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, () => { keys[code] = false; el.classList.remove('on'); }); }
 const bb = $('boost'); let btnBoost = false;
 bb.addEventListener('pointerdown', (e) => { e.stopPropagation(); btnBoost = true; bb.classList.add('on'); haptic('light'); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) bb.addEventListener(ev, () => { btnBoost = false; bb.classList.remove('on'); });
-const keys = {};
 addEventListener('keydown', (e) => { keys[e.code] = true; if (/^(Space|Arrow)/.test(e.code)) e.preventDefault(); });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 let KH = null;   // with keys, the phone keeps the heading itself and the game just follows it
 function controls(dt) {
   if (MODE === 'demo') return; const me = meS(); if (!me || !me.alive) { KH = null; return; }
-  const r = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+  const r = (keys.ArrowRight || keys.KeyD || keys.TouchR ? 1 : 0) - (keys.ArrowLeft || keys.KeyA || keys.TouchL ? 1 : 0);
   const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight || !!keys.KeyW || !!keys.ArrowUp, t = performance.now();
   if (M.tm <= 0) { KH = null; return; }
   if (r) { if (src !== 'key' || KH === null) KH = PRED.ok ? PRED.a : me.a; src = 'key'; KH = wrapA(KH + r*G.TURN*(b && me.L > G.LMIN ? 0.8 : 1)*dt); }
