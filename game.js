@@ -284,22 +284,19 @@ const HEAD = { x: 0, z: 0, ok: false };
 function ground(cx, cy) { ndc.set(cx/innerWidth*2 - 1, -(cy/innerHeight)*2 + 1); ray.setFromCamera(ndc, cam); return ray.ray.intersectPlane(plane, hitP) ? [hitP.x, hitP.z] : null; }
 function onDown(e) {
   if (MODE === 'demo' || e.target.closest('button') || e.target.closest('#boost')) return;
-  if (e.pointerType === 'mouse') { src = 'mouse'; mouse = [e.clientX, e.clientY]; if (e.button === 0) boost = true; return; }
+  if (e.pointerType === 'mouse') return;   // on a computer: keys only, the mouse never steers
   if (steerId === null) { src = 'touch'; steerId = e.pointerId; ox = e.clientX; oy = e.clientY; stick.style.left = ox + 'px'; stick.style.top = oy + 'px'; stick.style.display = 'block'; knob.style.transform = ''; }
   else if (boostId === null) { boostId = e.pointerId; boost = true; }
 }
 function onMove(e) {
   if (MODE === 'demo') return;
-  if (e.pointerType === 'mouse') {
-    // after the keys, the mouse takes over only when really moved, not when a palm brushes the touchpad
-    if (src === 'key') { if (!mouseFrom) mouseFrom = [e.clientX, e.clientY]; if (Math.hypot(e.clientX - mouseFrom[0], e.clientY - mouseFrom[1]) < 120 || performance.now() - keyT < 1500) return; }
-    src = 'mouse'; mouseFrom = null; mouse = [e.clientX, e.clientY]; return; }
+  if (e.pointerType === 'mouse') return;
   if (e.pointerId !== steerId) return; const dx = e.clientX - ox, dy = e.clientY - oy, d = Math.hypot(dx, dy);
   if (d > 8) { const a = ground(ox, oy), b = ground(e.clientX, e.clientY); aim = a && b ? Math.atan2(b[1] - a[1], b[0] - a[0]) : Math.atan2(dy, dx); }
   const k = Math.min(d, 36)/(d || 1); knob.style.transform = 'translate(' + dx*k + 'px,' + dy*k + 'px)';
 }
 function onUp(e) {
-  if (e.pointerType === 'mouse') { if (e.button === 0) boost = false; return; }
+  if (e.pointerType === 'mouse') return;
   if (e.pointerId === steerId) { steerId = null; stick.style.display = 'none'; }
   if (e.pointerId === boostId) { boostId = null; boost = false; }
 }
@@ -321,7 +318,6 @@ function controls(dt) {
     if (combo !== keyCombo) { keyHold += dt; if (keyHold > 0.09 || (kx && kz) || keyCombo === '0,0') { keyCombo = combo; keyHold = 0; } } else keyHold = 0;
     const [cx, cz] = keyCombo.split(',').map(Number); if (cx || cz) aim = Math.atan2(cz, cx); }
   else { keyCombo = '0,0'; keyHold = 0; }
-  if (!(kx || kz) && src === 'mouse' && mouse && HEAD.ok) { const p = ground(mouse[0], mouse[1]); if (p && Math.hypot(p[0] - HEAD.x, p[1] - HEAD.z) > 0.8) aim = Math.atan2(p[1] - HEAD.z, p[0] - HEAD.x); }
   const b = boost || btnBoost || !!keys.Space || !!keys.ShiftLeft || !!keys.ShiftRight, a = aim === null ? me.a : aim, t = performance.now();
   if ((Math.abs(a - sentA) > 0.03 || b !== sentB) && t - sentT > 40) { sentA = a; sentB = b; sentT = t;
     const c = { a: Math.round(a*1000)/1000, b: b ? 1 : 0 };
