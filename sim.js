@@ -1,7 +1,7 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
-export const VERSION = '1.36';   // one number for the page and the server: they tell each other which one they are
+export const VERSION = '1.37';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
@@ -128,11 +128,15 @@ function pickGoal(S, s, A) {
   let best = null, cd = 1e9;
   for (const f of S.food) { if (!(f[4] >= 0 && S.tm - f[4] < 8)) continue; const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx*dx + dz*dz; if (d2 < sight*sight && d2 < cd) { cd = d2; best = [f[1], f[2]]; } }
   if (best) { A.goal = best; A.boostWant = cd > 30; return; }
+  // 1b. someone smaller, close by and not hard against the wall: go round them and squeeze
+  if (!A.coil && !s.auto && s.L >= 70 && S.tm > (A.coilCd || 0) && S.rnd() < 0.12 + A.skill*0.16) { let pick = null, pd = 1e9;
+    for (const o of S.sn) { if (o === s || !o.alive || o.safe > S.tm || o.L > s.L*0.7) continue; const d = Math.hypot(o.x - s.x, o.z - s.z); if (d < 3 || d > 11 || Math.hypot(o.x, o.z) > S.R - 5.5 || d >= pd) continue; pd = d; pick = o; }
+    if (pick) { const side = Math.cos(s.a)*(pick.z - s.z) - Math.sin(s.a)*(pick.x - s.x); A.coil = { i: pick.i, id: pick.id, dir: side > 0 ? 1 : -1, r: Math.max(4.2, Math.min(6.5, s.L*SEG/(2*Math.PI)*0.75)), until: S.tm + 8 }; } }
   // 2. someone to cut off: get to a point ahead of their head before they do, then cross it
   if (!s.auto && s.L > LMIN + 8 && S.rnd() < 0.35 + A.skill*0.45) {
     let pick = null, ps = 0;
     for (const o of S.sn) { if (o === s || !o.alive) continue; const dx = o.x - s.x, dz = o.z - s.z, d = Math.hypot(dx, dz); if (d > 18 || d < 2) continue;
-      const lead = 3 + d*0.45, px = o.x + Math.cos(o.a)*lead, pz = o.z + Math.sin(o.a)*lead; if (Math.hypot(px, pz) > S.R - 3) continue;
+      const lead = 3 + d*0.45, px = o.x + Math.cos(o.a)*lead, pz = o.z + Math.sin(o.a)*lead; if (Math.hypot(px, pz) > S.R - 1.5) continue;
       const mine = Math.hypot(px - s.x, pz - s.z)/VB, theirs = lead/V; if (mine > theirs*0.85) continue;
       const sc = (o.bot ? 1 : 1.6)*(1 + o.L/60)/(d + 4); if (sc > ps) { ps = sc; pick = [px + Math.cos(o.a)*1.5, pz + Math.sin(o.a)*1.5]; } }
     if (pick) { A.goal = pick; A.boostWant = true; A.prey = true; return; }
@@ -141,7 +145,7 @@ function pickGoal(S, s, A) {
   const cells = new Map(), C = 4;
   for (const f of S.food) { const dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz > 900) continue; const key = Math.floor(f[1]/C)*1000 + Math.floor(f[2]/C); const c = cells.get(key); if (c) { c[0] += f[3]; c[1] += f[1]*f[3]; c[2] += f[2]*f[3]; } else cells.set(key, [f[3], f[1]*f[3], f[2]*f[3]]); }
   let bs = -1; for (const c of cells.values()) { const x = c[1]/c[0], z = c[2]/c[0], d = Math.hypot(x - s.x, z - s.z), ahead = Math.cos(Math.atan2(z - s.z, x - s.x) - s.a);
-    const sc = c[0]/(d + 5)*(1.15 + 0.35*ahead)*(Math.hypot(x, z) > S.R - 4 ? 0.2 : 1); if (sc > bs) { bs = sc; best = [x, z]; } }
+    const sc = c[0]/(d + 5)*(1.15 + 0.35*ahead)*(Math.hypot(x, z) > S.R - 0.9 ? 0.4 : 1); if (sc > bs) { bs = sc; best = [x, z]; } }
   // 4. the wall is closing in: stay towards the middle
   if (!S.fixed && S.tm > SHRINK - 5 && Math.hypot(s.x, s.z) > S.R*0.65) best = [s.x*0.3, s.z*0.3];
   A.goal = best || [-s.x*0.3, -s.z*0.3];
@@ -150,12 +154,18 @@ function think2(S, s, g) {
   const A = s.ai, r = radius(s.L), H = 0.8 + A.skill*0.6, closing = !S.fixed && S.tm > SHRINK - 3;
   A.think -= TICK; if (A.think <= 0 || !A.goal) { A.think = 0.15 + S.rnd()*0.1; pickGoal(S, s, A); }
   const heads = []; for (const o of S.sn) if (o !== s && o.alive && Math.abs(o.x - s.x) < 26 && Math.abs(o.z - s.z) < 26) heads.push(o);
-  const fly = (ta, boost) => { let x = s.x, z = s.z, a = s.a; const v = boost ? VB : V, dt = 0.1, tr = TURN*(boost ? 0.8 : 1)*dt, wall = S.R - r - 0.7 - (closing ? 2 : 0);
+  const fly = (ta, boost) => { let x = s.x, z = s.z, a = s.a; const v = boost ? VB : V, dt = 0.1, tr = TURN*(boost ? 0.8 : 1)*dt, wall = S.R - (boost ? 1.5 : 1.0) - (closing ? 2 : 0);   // the wall takes a snake only when the middle of its head crosses it, so the rim is fair ground
     for (let k = 1, t = dt; t <= H + 1e-9; k++, t += dt) { const d = wrap(ta - a); a += Math.max(-tr, Math.min(tr, d)); x += Math.cos(a)*v*dt; z += Math.sin(a)*v*dt;
       if (x*x + z*z > wall*wall) return t; if (hit(g, x, z, r + 0.3, s, true)) return t;
       for (const o of heads) { const px = o.x + Math.cos(o.a)*V*t, pz = o.z + Math.sin(o.a)*V*t, rr = r + radius(o.L) + 0.7; if ((px - x)*(px - x) + (pz - z)*(pz - z) < rr*rr) return t; } }
     return Infinity; };
-  const want = Math.atan2(A.goal[1] - s.z, A.goal[0] - s.x);
+  let want = Math.atan2(A.goal[1] - s.z, A.goal[0] - s.x);
+  // wrapping round someone: keep them on one side and go round, leaning in or out to hold the distance; once the
+  // ring has closed, ride it as it draws in. Given up if they get away, die, or it takes too long.
+  if (A.coil) { const o = S.sn[A.coil.i];
+    if (!o || !o.alive || o.id !== A.coil.id || S.tm > A.coil.until || s.L < 40 || Math.hypot(o.x - s.x, o.z - s.z) > 18) { A.coil = null; A.coilCd = S.tm + 8; }
+    else { const held = s.coilT > 0 && s.coilC, cx = held ? s.coilC[0] : o.x + Math.cos(o.a)*V*0.35, cz = held ? s.coilC[1] : o.z + Math.sin(o.a)*V*0.35, dx = s.x - cx, dz = s.z - cz, d = Math.hypot(dx, dz), Rc = held ? Math.max(COILMIN, s.coilR || d) : A.coil.r;
+      want = Math.atan2(dz, dx) + A.coil.dir*(Math.PI/2 + Math.max(-0.6, Math.min(0.6, (d - Rc)*0.5))); if (held) A.coil.until = Math.max(A.coil.until, S.tm + 3); A.boostWant = !held && s.L > 55; A.prey = true; } }
   let pick = want, low = 1e9, pickT = Infinity;
   const tryA = (ta) => { const T = fly(ta, false), cost = (T === Infinity ? 0 : (H + 0.2 - T)*80) + Math.abs(wrap(ta - want))*1.2 + Math.abs(wrap(ta - s.a))*0.15; if (cost < low) { low = cost; pick = ta; pickT = T; } };
   tryA(want); for (const off of FAN) tryA(wrap(s.a + off));
@@ -189,12 +199,12 @@ function coil(S, s) {
     for (let i = 1; i < t.length; i++) { const a = Math.atan2(t[i][1] - o.z, t[i][0] - o.x); w += wrap(a - pa); pa = a; if (w >= 2*Math.PI || w <= -2*Math.PI) { at = i; break; } }
     if (at < 0 || Math.hypot(t[at][0] - t[0][0], t[at][1] - t[0][1]) > gapMax) continue;   // not all the way round, or the way out is still wide open
     if (k < 0 || at < k) { k = at; who = o; } }
-  if (k < 0) { s.coilT = Math.max(0, (s.coilT || 0) - 2*TICK); if (!s.coilT) s.coilC = null; return; }
+  if (k < 0) { s.coilT = Math.max(0, (s.coilT || 0) - 2*TICK); if (!s.coilT) { s.coilC = null; s.coilR = 0; } return; }
   let cx = 0, cz = 0; for (let i = 0; i <= k; i++) { cx += t[i][0]; cz += t[i][1]; } cx /= k + 1; cz /= k + 1;
   // the middle it pulls towards moves smoothly, or the whole coil would shiver
   if (s.coilC) { cx = s.coilC[0] + (cx - s.coilC[0])*0.25; cz = s.coilC[1] + (cz - s.coilC[1])*0.25; } s.coilC = [cx, cz];
   let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1;
-  s.coilT = Math.min(2.5, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/2.5), ease = e*e*(3 - 2*e);   // two and a half seconds to reach full pull
+  s.coilR = rad; s.coilT = Math.min(2.5, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/2.5), ease = e*e*(3 - 2*e);   // two and a half seconds to reach full pull
   const f = rad <= COILMIN ? 1 : Math.max(0.9, 1 - SQUEEZE*ease*TICK/rad); cx = q(cx); cz = q(cz);
   const clear = q(r + radius(who.L)*0.85);   // how close the caught one's body may lie to the middle of mine
   if (f < 1) squeeze(s, k, cx, cz, f); squeezeIn(who, s, k, cx, cz, clear);
