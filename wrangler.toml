@@ -22,3 +22,24 @@ new_sqlite_classes = ["Lobby"]
 [assets]
 directory = "."
 not_found_handling = "none"
+
+# ---- the test copy: everything new goes here first (snakes-test.<account>.workers.dev). The real game is only
+# updated on purpose (the "Release to players" workflow), so nobody is updated in the middle of a game.
+[env.test]
+name = "snakes-test"
+
+[[env.test.durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[env.test.durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[env.test.migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Lobby"]
+
+[env.test.assets]
+directory = "."
+not_found_handling = "none"

@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import * as G from './sim.js?v=1.31';
 
 const VERSION = G.VERSION;
-const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
+// the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
+const API = /\.workers\.dev$/.test(location.hostname) ? location.origin : 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
 const zt = () => window.ZT || {}, initStr = () => zt().init || (TG ? TG.initData : '');

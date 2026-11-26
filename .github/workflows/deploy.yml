@@ -1,24 +1,37 @@
 name: Deploy worker
+# Every push goes to the test copy only. The real game is updated by running this workflow by hand with "prod".
 on:
   push:
     branches: [main]
     paths: ['server/**', 'sim.js', 'game.js', 'index.html', 'lib/**', 'test/**', 'wrangler.toml', '.assetsignore', '_headers', '.github/workflows/deploy.yml']
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'test = the test copy, prod = the real game'
+        default: 'test'
+        type: choice
+        options: [test, prod]
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'test' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check the server and the game rules
         run: node --check server/worker.js && node test/sim.test.mjs && node test/bots.test.mjs && node test/endless.test.mjs
-      - name: Deploy to Cloudflare
-        if: ${{ env.CF_TOKEN != '' }}
+      - name: Deploy the test copy
+        if: ${{ env.CF_TOKEN != '' && env.TARGET == 'test' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: No key yet
-        if: ${{ env.CF_TOKEN == '' }}
-        run: echo "CLOUDFLARE_API_TOKEN is not set, nothing deployed"
+          command: deploy --env test
+      - name: Release to players
+        if: ${{ env.CF_TOKEN != '' && env.TARGET == 'prod' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
