@@ -9,6 +9,9 @@ export const COLORS = [0x00f0ff, 0xff2bd6, 0x7cff3a, 0xffb020, 0x9b6bff, 0xff404
 const BOTS = ['Кобра', 'Питон', 'Мамба', 'Гадюка', 'Анаконда', 'Удав', 'Тайпан', 'Уж', 'Гюрза', 'Эфа', 'Аспид', 'Полоз', 'Медянка', 'Боа', 'Ехидна', 'Крайт'];
 
 export const radius = (L) => 0.62 + Math.min(0.6, L/450);
+// how thick the body is along its length (f: 0 at the head, 1 at the tip of the tail): it thins out over the last fifth.
+// The picture and the collisions both use this, so what looks like a miss is a miss.
+export const taper = (f) => f < 0.8 ? 1 : 0.4 + 0.6*(1 - f)/0.2;
 export const arenaR = (tm) => tm < SHRINK ? R0 : Math.max(RMIN, R0 - (R0 - RMIN)*(tm - SHRINK)/(ROUND - SHRINK - 10));
 const q = (v) => Math.round(v*100)/100;
 const wrap = (a) => { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a += 2*Math.PI; return a; };
@@ -178,12 +181,21 @@ function coil(S, s) {
   S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f, v: who.i, r: q(rad) });
 }
 
+// a newborn stops blinking only once it is clear of everyone: is its head on someone's body, or someone's head on its body?
+function overlaps(S, s) {
+  const r = radius(s.L);
+  for (const o of S.sn) { if (o === s || !o.alive) continue; const rr = (r + radius(o.L))*(r + radius(o.L));
+    for (const p of s.tr) if ((p[0] - o.x)*(p[0] - o.x) + (p[1] - o.z)*(p[1] - o.z) < rr) return true;
+    for (const p of o.tr) if ((p[0] - s.x)*(p[0] - s.x) + (p[1] - s.z)*(p[1] - s.z) < rr) return true; }
+  return false;
+}
+
 // every body point, by cell, for collisions and for bots looking where they go
 const CELL = 3, HIT = { k: 0 };
 function grid(S) {
   const g = new Map();
-  for (const s of S.sn) { if (!s.alive || s.safe > S.tm) continue; const r = radius(s.L);
-    for (let k = 0; k < s.tr.length; k++) { const p = s.tr[k], key = Math.floor(p[0]/CELL)*1000 + Math.floor(p[1]/CELL); let c = g.get(key); if (!c) g.set(key, c = []); c.push(s, p[0], p[1], r, k); } }
+  for (const s of S.sn) { if (!s.alive || s.safe > S.tm) continue; const r = radius(s.L), n1 = Math.max(1, s.tr.length - 1);
+    for (let k = 0; k < s.tr.length; k++) { const p = s.tr[k], key = Math.floor(p[0]/CELL)*1000 + Math.floor(p[1]/CELL); let c = g.get(key); if (!c) g.set(key, c = []); c.push(s, p[0], p[1], r*taper(k/n1), k); } }
   return g;
 }
 function hit(g, x, z, r, me, skipOwn) {
@@ -236,6 +248,7 @@ function stepIn(S) {
     if (boost) { s.L = q(s.L - 1.6*TICK); s.dropT += TICK; if (s.dropT > 0.35) { s.dropT = 0; const p = s.tr[s.tr.length - 1]; food(S, p[0], p[1], 0.5); } }
     s.boosting = boost;
   }
+  for (const s of S.sn) if (s.alive && s.safe && s.safe <= S.tm) s.safe = S.tm - s.born < 6 && overlaps(S, s) ? S.tm + 0.3 : 0;
   for (const s of S.sn) if (s.alive) coil(S, s);
   // who hit whom this tick. Ramming someone's side right behind their head brings your head next to theirs too:
   // then only the one who did the ramming dies. Two snakes meeting head to head: the shorter one goes (both if equal).

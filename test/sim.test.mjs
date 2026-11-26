@@ -4,7 +4,7 @@ let fails = 0; const ok = (c, m) => { if (!c) { fails++; console.log('FAIL', m);
 for (let seed = 1; seed <= 5; seed++) {
   const S = G.newGame(seed, { round: true }); G.fillBots(S); const M = G.mirror(); let ticks = 0, bytes = 0, maxB = 0, mism = 0;
   G.apply(M, JSON.parse(JSON.stringify(G.snap(S, true))));
-  while (S.ph === 'play' && ticks < 3000) { G.step(S); ticks++; const full = ticks % 40 === 0, js = JSON.stringify(G.snap(S, full)); bytes += js.length; if (!full) maxB = Math.max(maxB, js.length); G.apply(M, JSON.parse(js));
+  while (S.ph === 'play' && ticks < 9000) { G.step(S); ticks++; const full = ticks % 40 === 0, js = JSON.stringify(G.snap(S, full)); bytes += js.length; if (!full) maxB = Math.max(maxB, js.length); G.apply(M, JSON.parse(js));
     for (const s of S.sn) { if (!s.alive) continue; const m = M.sn[s.i]; if (m.tr.length !== s.tr.length || m.tr.some((p, k) => p[0] !== s.tr[k][0] || p[1] !== s.tr[k][1])) mism++; } }
   const res = G.results(S);
   console.log('seed', seed, 'ticks', ticks, 'time', S.tm.toFixed(1), 'deaths', S.deaths, 'winner', res[0].name, 'L', res[0].L, 'kills', res.map((r) => r.kills).join(''), 'avg', Math.round(bytes/ticks), 'B max', maxB, 'B mismatches', mism);
@@ -66,3 +66,13 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
   const worst = Math.min(...steady);
   console.log('squeeze: trapped snake died', died + '/8', 'after', ticks.join(','), '| pulling on', Math.round(worst*100) + '% of ticks at worst | gentle start', gentle, '| phone out of step on', drift, 'ticks');
   if (died < 7 || drift || worst < 0.9 || !gentle) { console.log('FAIL squeeze'); process.exitCode = 1; } }
+
+// the tail: thin at the tip in the picture, so thin for collisions too. Passing a tail tip at a distance that
+// would hit the thick part of the body is a miss; touching the tip itself is still a hit.
+{ const run = (off, at) => { const S = G.newGame(8, { round: true }); S.tm = 0; const A = G.addSnake(S, 'a', 'A', false), B = G.addSnake(S, 'b', 'B', false);
+    B.tr = []; B.L = 60; for (let k = 60; k >= 0; k--) G.addHead(B, -k*G.SEG, 0); B.a = 0; B.ta = 0;          // B lies along x, head at 0, tail tip at -30
+    const x = at === 'tail' ? -29.5 : -12; A.tr = []; for (let k = 30; k >= 0; k--) G.addHead(A, x - k*G.SEG, off); A.a = 0; A.ta = 0;   // A runs alongside at a sideways distance `off`
+    for (let i = 0; i < 6 && A.alive; i++) G.step(S); return A.alive; };
+  const r = G.radius(60), mid = run(r*1.5, 'mid'), tip = run(r*1.5, 'tail'), tipTouch = run(r*0.9, 'tail');
+  console.log('alongside at 1.5 body widths: thick part', mid ? 'miss' : 'hit', '| tail tip', tip ? 'miss' : 'hit', '| right on the tip', tipTouch ? 'miss' : 'hit');
+  if (mid || !tip || tipTouch) { console.log('FAIL tail taper'); process.exitCode = 1; } }

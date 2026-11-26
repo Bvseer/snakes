@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.26';
+import * as G from './sim.js?v=1.27';
 
-export const VERSION = '1.26';
+export const VERSION = '1.27';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -77,11 +77,15 @@ const eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff }), eyeB = new THREE.
 const eyeG = new THREE.SphereGeometry(1, 10, 6);
 const EYEW = new THREE.InstancedMesh(eyeG, eyeW, G.MAXS*2), EYEB = new THREE.InstancedMesh(eyeG, eyeB, G.MAXS*2), eyeM = new THREE.Matrix4();   // two eyes for every snake there can be
 EYEW.frustumCulled = EYEB.frustumCulled = false; scene.add(EYEW, EYEB); let ei = 0;
-function label(text, col) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
-  x.font = '800 30px Manrope, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.shadowColor = hex(col); x.shadowBlur = 12; x.fillStyle = '#fff'; x.fillText(text, 128, 34);
+// the name over a head. A real person: a gold plate with a star, bigger. A bot: small and grey.
+function label(text, col, human) {
+  const c = document.createElement('canvas'); c.width = 384; c.height = 96; const x = c.getContext('2d'); x.textAlign = 'center'; x.textBaseline = 'middle';
+  if (human) { x.font = '800 40px Manrope, system-ui, sans-serif'; const t = '★ ' + text, w = Math.min(372, x.measureText(t).width + 44), l = 192 - w/2;
+    x.beginPath(); x.roundRect(l, 16, w, 64, 32); x.fillStyle = 'rgba(40,28,0,.82)'; x.fill(); x.lineWidth = 4; x.strokeStyle = '#ffd24a'; x.shadowColor = '#ffd24a'; x.shadowBlur = 14; x.stroke();
+    x.shadowBlur = 0; x.fillStyle = '#ffe9a0'; x.fillText(t, 192, 50, 340); }
+  else { x.font = '700 30px Manrope, system-ui, sans-serif'; x.shadowColor = 'rgba(0,0,0,.9)'; x.shadowBlur = 8; x.fillStyle = 'rgba(190,204,224,.8)'; x.fillText(text, 192, 50, 360); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false })); s.scale.set(5.2, 1.3, 1); s.renderOrder = 5; return s;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false })); const k = human ? 1.25 : 0.9; s.scale.set(7.8*k, 1.95*k, 1); s.renderOrder = human ? 6 : 5; return s;
 }
 const VIS = [];
 function vis(i) {
@@ -191,7 +195,7 @@ function showDeath() {
   $('oTitle').innerHTML = 'ТЫ РАЗБИЛСЯ<small>' + (DEATH.by ? 'врезался в ' + esc(DEATH.by) : 'о стену арены') + '</small>';
   const top = M.sn.filter((o) => o.alive).sort((a, b) => b.L - a.L).slice(0, 5);
   $('res').innerHTML = '<div class="me"><span class="n">📏 ' + DEATH.L + ' · 💥 ' + DEATH.kills + ' · ⏱ ' + m + ':' + String(sec).padStart(2, '0') + '</span><span class="s">' + DEATH.rank + ' место из ' + DEATH.of + '</span></div>'
-    + '<p class="lb">Сейчас на арене лучшие:</p>' + top.map((r, k) => '<div><span class="p">' + (k + 1) + '</span><i style="color:' + hex(G.COLORS[r.col % G.COLORS.length]) + '"></i><span class="n">' + esc(r.name) + '</span><span class="s">📏 ' + Math.floor(r.L) + '</span></div>').join('');
+    + '<p class="lb">Сейчас на арене лучшие:</p>' + top.map((r, k) => '<div><span class="p">' + (k + 1) + '</span><i style="color:' + hex(G.COLORS[r.col % G.COLORS.length]) + '"></i><span class="n' + (r.bot ? '' : ' hum') + '">' + (r.bot ? '' : '★ ') + esc(r.name) + '</span><span class="s">📏 ' + Math.floor(r.L) + '</span></div>').join('');
   $('oInvite').classList.toggle('hidden', MODE !== 'net' || !!(NET && NET.pub));
 }
 function applySnap(o) {
@@ -223,7 +227,7 @@ function onEvent(e) {
 // whatever the game then says only nudges it, smoothly. Everyone else is drawn as the game said.
 const INLOG = [];   // what the controls said and when: { t, r, a, b, key }
 let AUTH = null, RTT = 0.1, corrX = 0, corrZ = 0, corrA = 0, predLast = null;
-const PRED = { ok: false, x: 0, z: 0, a: 0, path: [], bx: 0, bz: 0, ba: 0 };
+const PRED = { own: true, ok: false, x: 0, z: 0, a: 0, path: [], bx: 0, bz: 0, ba: 0 };
 function logInput(c, key) { const t = FT0; INLOG.push({ t, r: c.r | 0, a: c.a, b: !!c.b, key }); while (INLOG.length > 2 && INLOG[1].t < t - 3000) INLOG.shift(); }
 function inputAt(t) { let v = null; for (let i = INLOG.length - 1; i >= 0; i--) if (INLOG[i].t <= t) { v = INLOG[i]; break; } return v || INLOG[0] || null; }
 function setAuth(x, z, a, L, alive, t0, tm) {
@@ -265,7 +269,8 @@ function buildTube(v, s, hx, hz, L, r, pre) {
   // your own snake: the path the phone predicted, newest first, then where the game last put the head
   let bx = hx, bz = hz, bfx = fx, bfz = fz;
   if (pre) { const P2 = pre.path, cnt = P2.length/2;
-    for (let j = cnt - 2; j >= 0 && n < MAXPT - 2; j -= 2) { const px = P2[j*2] + corrX*(j/cnt), pz = P2[j*2 + 1] + corrZ*(j/cnt), d = Math.hypot(px - PX[n - 1], pz - PZ[n - 1]); if (cum + d >= want) break; cum += d; PX[n] = px; PZ[n] = pz; n++; }
+    const kx = pre.own ? corrX : 0, kz = pre.own ? corrZ : 0;
+    for (let j = cnt - 2; j >= 0 && n < MAXPT - 2; j -= 2) { const px = P2[j*2] + kx*(j/cnt), pz = P2[j*2 + 1] + kz*(j/cnt), d = Math.hypot(px - PX[n - 1], pz - PZ[n - 1]); if (cum + d >= want) break; cum += d; PX[n] = px; PZ[n] = pz; n++; }
     const d = Math.hypot(pre.bx - PX[n - 1], pre.bz - PZ[n - 1]); if (cum + d < want) { cum += d; PX[n] = pre.bx; PZ[n] = pre.bz; n++; }
     bx = pre.bx; bz = pre.bz; bfx = Math.cos(pre.ba); bfz = Math.sin(pre.ba); }
   while (k < tr.length && (tr[k][0] - bx)*bfx + (tr[k][1] - bz)*bfz > -0.05) k++;   // points the drawn head has not reached yet
@@ -281,7 +286,7 @@ function buildTube(v, s, hx, hz, L, r, pre) {
   for (let i = 0; i < n; i++) {
     if (i) run += Math.hypot(PX[i] - PX[i - 1], PZ[i] - PZ[i - 1]);
     const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = PX[a] - PX[b], tz = PZ[a] - PZ[b]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    const f = run/total, rr = r*(f < 0.65 ? 1 : 0.28 + 0.72*(1 - f)/0.35), sx = -tz, sz = tx;
+    const f = run/total, rr = r*G.taper(f), sx = -tz, sz = tx;
     for (let q = 0; q < RING; q++) { const c = COS[q], sn = SIN[q], nx = sx*c, nz = sz*c, o = (i*RING + q)*3;
       P[o] = PX[i] + nx*rr; P[o + 1] = cy + sn*rr; P[o + 2] = PZ[i] + nz*rr; N[o] = nx; N[o + 1] = sn; N[o + 2] = nz; A[i*RING + q] = PU[i]; }
   }
@@ -299,6 +304,19 @@ function glowAt(x, y, z, col, size) { if (gi >= GLOWN) return; GP[gi*3] = x; GP[
 // a snake whose whole body is far from what the camera sees is not built at all this frame
 function near(s) { const reach = camH*1.3 + s.L*G.SEG + 4; return Math.abs(s.x - camT.x) < reach && Math.abs(s.z - camT.z) < reach; }
 const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); let camH = 30, follow = -1;
+// Your own snake is drawn where it will be when your hand reaches the game; everyone else used to be drawn where
+// they were a moment ago. That gap (a couple of body widths at speed) is what made near misses count as crashes.
+// So the others are carried forward by the same amount along the way they are going: their bodies follow the true
+// path, only the last stretch in front of the head is an estimate, eased so it does not twitch.
+function leadTime() { return MODE === 'net' ? Math.min(0.25, 0.09 + RTT) : MODE === 'solo' ? G.TICK : 0; }
+function ahead(v, s, bx, bz, dt, lead) {
+  const E = v.ex || (v.ex = { own: false, id: null, om: 0, sp: G.V, path: [], bx: 0, bz: 0, ba: 0, x: 0, z: 0, a: 0 });
+  const pa = Number.isFinite(s.pa) ? s.pa : s.a, om = Math.max(-G.TURN, Math.min(G.TURN, wrapA(s.a - pa)/G.TICK)), sp = s.boosting ? G.VB : G.V;
+  if (E.id !== s.id) { E.id = s.id; E.om = om; E.sp = sp; } else { const k = Math.min(1, dt*12); E.om += (om - E.om)*k; E.sp += (sp - E.sp)*k; }
+  let a = pa + wrapA(s.a - pa)*ALPHA, x = bx, z = bz; E.path.length = 0; E.bx = bx; E.bz = bz; E.ba = a;
+  const n = 4, h = lead/n; for (let i = 0; i < n; i++) { a += E.om*h; x += Math.cos(a)*E.sp*h; z += Math.sin(a)*E.sp*h; E.path.push(x, z); }
+  E.x = x; E.z = z; E.a = wrapA(a); return E;
+}
 // being in a coil, or holding one, is felt: a word when it starts, a pulse at the screen's edge for the one inside,
 // a low beat that rises as the coil tightens, and the camera leans in a little
 const COIL = { role: null, was: null, name: '', tight: 0, endT: 0, beatT: 0, zoom: 1, cx: 0, cz: 0, r: 0, look: 0, fit: 0 };
@@ -318,7 +336,7 @@ function drawWorld(dt) {
   const al = ALPHA;
   floorMat.uniforms.uR.value = M.R; edgeAt(M.R); wall.scale.set(M.R, 1, M.R);
   const warn = !M.fixed && M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
-  gi = 0; ei = 0; COIL.role = null;
+  gi = 0; ei = 0; COIL.role = null; const LEAD = leadTime();
   HEAD.ok = false;
   M.sn.forEach((s, i) => {
     const v = vis(i), col = G.COLORS[s.col % G.COLORS.length]; v.mat.uniforms.uCol.value.setHex(col);
@@ -326,12 +344,13 @@ function drawWorld(dt) {
     if (!show) { v.sqA = 0; if (v.fan) v.fan.visible = false; }
     if (v.tag) v.tag.visible = false;
     if (!show) return;
-    const mine = s.id === ME && PRED.ok;
-    const hx = mine ? PRED.x : s.px + (s.x - s.px)*al, hz = mine ? PRED.z : s.pz + (s.z - s.pz)*al, Lr = s.pL + (s.L - s.pL)*al, r = G.radius(Lr);
+    const mine = s.id === ME && PRED.ok, Lr = s.pL + (s.L - s.pL)*al, r = G.radius(Lr);
+    let hx = mine ? PRED.x : s.px + (s.x - s.px)*al, hz = mine ? PRED.z : s.pz + (s.z - s.pz)*al, pre = mine ? PRED : null, ha = mine ? PRED.a : s.a;
+    if (!mine && s.id !== ME && LEAD > 0 && M.tm > 0) { pre = ahead(v, s, hx, hz, dt, LEAD); hx = pre.x; hz = pre.z; ha = pre.a; }
     if (s.id === ME) { HEAD.x = hx; HEAD.z = hz; HEAD.ok = true; }
     v.mat.uniforms.uBoost.value += ((s.boosting ? 1 : 0) - v.mat.uniforms.uBoost.value)*Math.min(1, dt*8);
     v.mat.uniforms.uFade.value = s.safe ? 0.45 + 0.4*Math.abs(Math.sin(performance.now()/90)) : 1;   // just born: blinking, cannot be hit
-    const np = buildTube(v, s, hx, hz, Lr, r, mine ? PRED : null);
+    const np = buildTube(v, s, hx, hz, Lr, r, pre);
     // tightening a coil around someone: the floor inside lights up, the body pulses, sparks are drawn inwards
     const sq = s.sq, coiling = !!sq && curTick - sq.tm <= 2 && RINGN > 6;
     v.sqA += ((coiling ? 1 : 0) - v.sqA)*Math.min(1, dt*(coiling ? 5 : 7)); v.mat.uniforms.uSq.value = v.sqA;
@@ -342,14 +361,14 @@ function drawWorld(dt) {
     else if (v.fan) v.fan.material.uniforms.uA.value = v.sqA*0.55;
     if (v.fan) v.fan.visible = v.sqA > 0.02;
     const hr = r*1.18; v.head.position.set(hx, r*0.95, hz); v.head.scale.setScalar(hr);
-    const ha = mine ? PRED.a : s.a, fx = Math.cos(ha), fz = Math.sin(ha), sx = -fz, sz = fx;
+    const fx = Math.cos(ha), fz = Math.sin(ha), sx = -fz, sz = fx;
     for (let k = 0; k < 2; k++) { const side = k ? 1 : -1, ex = hx + fx*hr*0.45 + sx*side*hr*0.5, ez = hz + fz*hr*0.45 + sz*side*hr*0.5, ey = r*0.95 + hr*0.55, a = hr*0.34, b = hr*0.19;
       eyeM.makeScale(a, a, a).setPosition(ex, ey, ez); EYEW.setMatrixAt(ei, eyeM); eyeM.makeScale(b, b, b).setPosition(ex + fx*hr*0.17, ey + hr*0.08, ez + fz*hr*0.17); EYEB.setMatrixAt(ei, eyeM); ei++; }
     tmpC.setHex(col);
     if (QL > 0) for (let k = 3; k < np; k += 7) glowAt(PX[k], 0.3, PZ[k], tmpC, r*6*(1 - k/np*0.5));
     glowAt(hx, 0.2, hz, tmpC, r*11);
     if (s.boosting && Math.random() < (QL > 0 ? 0.6 : 0.25)) spark(PX[np - 1], r, PZ[np - 1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45);
-    if (MODE !== 'demo' && s.id !== ME) { if (!v.tag || v.tagName !== s.name) { if (v.tag) scene.remove(v.tag); v.tag = label(s.name, col); v.tagName = s.name; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + 2.2, hz); }
+    if (MODE !== 'demo' && s.id !== ME) { const key = (s.bot ? 'b:' : 'h:') + s.name; if (!v.tag || v.tagName !== key) { if (v.tag) { scene.remove(v.tag); v.tag.material.map.dispose(); v.tag.material.dispose(); } v.tag = label(s.name, col, !s.bot); v.tagName = key; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + (s.bot ? 2.0 : 2.5), hz); }
   });
   for (let i = M.sn.length; i < VIS.length; i++) { const v = VIS[i]; if (!v) continue; v.body.visible = v.head.visible = false; if (v.tag) v.tag.visible = false; if (v.fan) v.fan.visible = false; }
   coilFeel(dt);
@@ -387,12 +406,13 @@ function hud(dt) {
 
   const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + (MODE === 'net' && NET && NET.players ? (NET.pub ? ' · 🌍 ' : ' · 👥 ') + NET.players.length : '');
   const me = meS(); $('hLen').textContent = me ? (me.alive ? '📏 ' + Math.floor(me.L) : '👀 смотришь') : '';
-  let rows = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L); const mi = rows.findIndex((s) => s.id === ME); rows = rows.slice(0, 8); if (mi >= 8) rows.push(M.sn.find((s) => s.id === ME && s.alive));
-  const bh = rows.map((s) => '<div class="' + (s.id === ME ? 'me ' : '') + (s.alive ? '' : 'dead') + '">' + esc(nameOf(s)) + ' ' + Math.floor(s.L) + '<i style="color:' + hex(G.COLORS[s.col % G.COLORS.length]) + '"></i></div>').join(''); if (bh !== boardH) { boardH = bh; $('board').innerHTML = bh; }
+  // the eight longest, and every real person on the arena whatever their length (you included)
+  const all = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L), rows = all.slice(0, 8); for (const s of all) if (!s.bot && !rows.includes(s) && rows.length < 13) rows.push(s);
+  const bh = rows.map((s) => '<div class="' + (s.id === ME ? 'me ' : s.bot ? '' : 'hum ') + (s.alive ? '' : 'dead') + '">' + (s.bot || s.id === ME ? '' : '★ ') + esc(nameOf(s)) + ' ' + Math.floor(s.L) + '<i style="color:' + hex(G.COLORS[s.col % G.COLORS.length]) + '"></i></div>').join(''); if (bh !== boardH) { boardH = bh; $('board').innerHTML = bh; }
   // minimap
   const W = 184, k = W/2/((M.R0 || G.RE) + 2); mini.clearRect(0, 0, W, W); mini.save(); mini.translate(W/2, W/2);
   mini.strokeStyle = floorMat.uniforms.uWarn.value > 0.5 ? '#ff2b80' : '#00f0ff'; mini.lineWidth = 2; mini.beginPath(); mini.arc(0, 0, M.R*k, 0, Math.PI*2); mini.stroke();
-  for (const s of M.sn) { if (!s.alive) continue; mini.fillStyle = hex(G.COLORS[s.col % G.COLORS.length]); const big = s.id === ME; mini.beginPath(); mini.arc(s.x*k, s.z*k, big ? 6 : 3.5 + Math.min(3, s.L/80), 0, Math.PI*2); mini.fill(); if (big) { mini.strokeStyle = '#fff'; mini.lineWidth = 2; mini.stroke(); } }
+  for (const s of M.sn) { if (!s.alive) continue; mini.fillStyle = hex(G.COLORS[s.col % G.COLORS.length]); const big = s.id === ME; mini.beginPath(); mini.arc(s.x*k, s.z*k, big ? 6 : (s.bot ? 3.5 : 5) + Math.min(3, s.L/80), 0, Math.PI*2); mini.fill(); if (!big && !s.bot) { mini.strokeStyle = '#ffd24a'; mini.lineWidth = 2.5; mini.stroke(); } if (big) { mini.strokeStyle = '#fff'; mini.lineWidth = 2; mini.stroke(); } }
   mini.restore();
 }
 function feed(text, mine) { const d = document.createElement('div'); d.textContent = text; if (mine) d.style.border = '1px solid #00f0ff'; $('feed').prepend(d); while ($('feed').children.length > 4) $('feed').lastChild.remove(); setTimeout(() => d.remove(), 3300); }
