@@ -1,7 +1,7 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
-export const VERSION = '1.34';   // one number for the page and the server: they tell each other which one they are
+export const VERSION = '1.35';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
@@ -172,11 +172,14 @@ function think2(S, s, g) {
 // not stutter while the snake keeps circling.
 export const SQUEEZE = 0.45, COILMIN = 2.2;   // units per second the coil closes in; the tightest it gets
 export function squeeze(s, k, cx, cz, f) { const t = s.tr; for (let i = 0; i <= k && i < t.length; i++) t[i] = [q(cx + (t[i][0] - cx)*f), q(cz + (t[i][1] - cz)*f)]; }
-// what the coil holds is squeezed with it. The caught snake's body is gathered inside the ring: whatever of it lies
-// further out than `rin` (between my turns, or trailing away outside) is hauled in, and what is inside is drawn
-// towards the middle together with the ring — so none of it is left sticking out of the body that is crushing it
-export const HAUL = 9;   // units per second a body is hauled in
-export function squeezeIn(v, cx, cz, f, rin) { const t = v.tr, step = HAUL*TICK; for (let i = 0; i < t.length; i++) { const dx = t[i][0] - cx, dz = t[i][1] - cz, d = Math.hypot(dx, dz); if (d < 0.01) continue; const nd = d > rin ? Math.max(rin, d - step) : d*f; if (nd !== d) t[i] = [q(cx + dx/d*nd), q(cz + dz/d*nd)]; } }
+// The ring is solid. As it draws in it pushes the caught snake's body ahead of it instead of passing through it:
+// a body point that the ring has come up against is eased inwards, a little on each tick, just far enough to stay
+// clear. Nothing else is moved — the body keeps its shape and is simply left with less and less room.
+export const PUSH = 0.06;   // the most a body point is moved on one tick
+export function squeezeIn(v, c, k, cx, cz, clear) { const t = v.tr, ring = c.tr, kk = Math.min(k, ring.length - 1), c2 = clear*clear;
+  for (let i = 0; i < t.length; i++) { const px = t[i][0], pz = t[i][1]; let bd = c2, bj = -1; for (let j = 0; j <= kk; j++) { const dx = px - ring[j][0], dz = pz - ring[j][1], d2 = dx*dx + dz*dz; if (d2 < bd) { bd = d2; bj = j; } } if (bj < 0) continue;
+    const R = Math.hypot(ring[bj][0] - cx, ring[bj][1] - cz), dx = px - cx, dz = pz - cz, d = Math.hypot(dx, dz); if (d > R + 0.25 || d < 0.05) continue;   // on the outside of the ring: not what is being squeezed
+    const want = Math.max(0.3, R - clear); if (d <= want) continue; const nd = Math.max(want, d - PUSH); t[i] = [q(cx + dx/d*nd), q(cz + dz/d*nd)]; } }
 function coil(S, s) {
   const t = s.tr, r = radius(s.L), reach = s.L*SEG/Math.PI + 1, gapMax = 3 + 3*r;
   let k = -1, who = null;
@@ -193,10 +196,9 @@ function coil(S, s) {
   let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1;
   s.coilT = Math.min(2.5, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/2.5), ease = e*e*(3 - 2*e);   // two and a half seconds to reach full pull
   const f = rad <= COILMIN ? 1 : Math.max(0.9, 1 - SQUEEZE*ease*TICK/rad); cx = q(cx); cz = q(cz);
-  // room inside the ring for the caught one's body: clear of my own, so I do not run into what I am holding
-  let near = 1e9; for (let i = 0; i <= k; i++) near = Math.min(near, Math.hypot(t[i][0] - cx, t[i][1] - cz)); const rin = q(Math.max(0.4, near - r - radius(who.L) - 0.3));
-  squeeze(s, k, cx, cz, f); squeezeIn(who, cx, cz, f, rin);
-  S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f, v: who.i, r: q(rad), m: rin });
+  const clear = q(r + radius(who.L)*0.85);   // how close the caught one's body may lie to the middle of mine
+  if (f < 1) squeeze(s, k, cx, cz, f); squeezeIn(who, s, k, cx, cz, clear);
+  S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f, v: who.i, r: q(rad), c: clear });
 }
 
 // a newborn stops blinking only once it is clear of everyone: is its head on someone's body, or someone's head on its body?
@@ -349,7 +351,7 @@ export function apply(M, o) {
     s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.safe = !!(h[5] & 4); s.alive = !!(h[5] & 1); }
   if (o.ev && !o.full) for (const e of o.ev) {
     // the coil tightened this tick: the same pull here, and what the picture needs to show it (who, how tight, when)
-    if (e.t === 'sq' && M.sn[e.i]) { const c = M.sn[e.i]; if (e.m) { squeeze(c, e.k, e.cx, e.cz, e.f); if (M.sn[e.v]) squeezeIn(M.sn[e.v], e.cx, e.cz, e.f, e.m); } else if (e.f < 1) squeeze(c, e.k, e.cx, e.cz, e.f); c.sq = { k: e.k, cx: e.cx, cz: e.cz, f: e.f, v: e.v, r: e.r, tm: o.tm }; }
+    if (e.t === 'sq' && M.sn[e.i]) { const c = M.sn[e.i]; if (e.f < 1) squeeze(c, e.k, e.cx, e.cz, e.f); if (e.c && M.sn[e.v]) squeezeIn(M.sn[e.v], c, e.k, e.cx, e.cz, e.c); c.sq = { k: e.k, cx: e.cx, cz: e.cz, f: e.f, v: e.v, r: e.r, tm: o.tm }; }
   }
   if (o.fr || o.fa || o.full) M.fv = (M.fv || 0) + 1;
   if (o.fr) for (const id of o.fr) M.food.delete(id);

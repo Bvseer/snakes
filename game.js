@@ -1,6 +1,6 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.34';
+import * as G from './sim.js?v=1.35';
 
 const VERSION = G.VERSION;
 // the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
@@ -288,18 +288,18 @@ function buildTube(v, s, hx, hz, L, r, pre) {
     for (let j = cnt - 2; j >= 0 && n < MAXPT - 2; j -= 2) { const px = P2[j*2] + kx*(j/cnt), pz = P2[j*2 + 1] + kz*(j/cnt), d = Math.hypot(px - PX[n - 1], pz - PZ[n - 1]); if (cum + d >= want) break; cum += d; PX[n] = px; PZ[n] = pz; n++; }
     const d = Math.hypot(pre.bx - PX[n - 1], pre.bz - PZ[n - 1]); if (cum + d < want) { cum += d; PX[n] = pre.bx; PZ[n] = pre.bz; n++; }
     bx = pre.bx; bz = pre.bz; bfx = Math.cos(pre.ba); bfz = Math.sin(pre.ba); }
-  while (k < tr.length && (tr[k][0] - bx)*bfx + (tr[k][1] - bz)*bfz > -0.05) k++;   // points the drawn head has not reached yet
+  while (k < tr.length && k < 8 && (tr[k][0] - bx)*bfx + (tr[k][1] - bz)*bfz > -0.05) k++;   // points the drawn head has not reached yet (a few at most: a body pressed into a small space lies all round its head)
   const baseU = ((s.n || 0) - k + 1)*G.SEG + (k < tr.length ? Math.hypot(tr[k][0] - bx, tr[k][1] - bz) : 0);
   PU[0] = baseU + cum; for (let j = 1, run = 0; j < n; j++) { run += Math.hypot(PX[j] - PX[j - 1], PZ[j] - PZ[j - 1]); PU[j] = baseU + cum - run; }
   // Where the body runs straight, most of its points add nothing: one is kept every 1.5 units there, all of them in a
   // bend. A snake going straight is drawn with a third of the triangles, and a third of the work to build them.
-  const k0 = k; let bend = 0;
+  const k0 = k; let bend = 0, skipped = 0;
   for (; k < tr.length && n < MAXPT; k++) {
     let x = tr[k][0], z = tr[k][1]; const coil = sq && k <= sq.k; if (coil && pull !== 1) { x = sq.cx + (x - sq.cx)*pull; z = sq.cz + (z - sq.cz)*pull; }
     const d = Math.hypot(x - PX[n - 1], z - PZ[n - 1]);
     if (cum + d >= want) { const f = d > 0 ? (want - cum)/d : 0; PX[n] = PX[n - 1] + (x - PX[n - 1])*f; PZ[n] = PZ[n - 1] + (z - PZ[n - 1])*f; PU[n] = PU[n - 1] - d*f; cum = want; n++; break; }
-    if (k > k0 + 2 && k + 1 < tr.length) { const a = tr[k - 1], b = tr[k], c = tr[k + 1]; bend += ((b[0] - a[0])*(c[1] - b[1]) - (b[1] - a[1])*(c[0] - b[0]))*4; if (bend < 0.07 && bend > -0.07 && d < 1.1) continue; }
-    bend = 0; if (coil) RINGN = n;
+    if (k > k0 + 2 && k + 1 < tr.length) { const a = tr[k - 1], b = tr[k], c = tr[k + 1]; bend += ((b[0] - a[0])*(c[1] - b[1]) - (b[1] - a[1])*(c[0] - b[0]))*4; if (bend < 0.07 && bend > -0.07 && d < 1.1 && skipped < 4) { skipped++; continue; } }
+    bend = 0; skipped = 0; if (coil) RINGN = n;
     cum += d; PX[n] = x; PZ[n] = z; PU[n] = ((s.n || 0) - k)*G.SEG; n++;
   }
   const total = Math.max(cum, 0.01), D = v.D; let run = 0;

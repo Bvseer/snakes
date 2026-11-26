@@ -67,22 +67,26 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
   const worst = Math.min(...steady);
   console.log('squeeze: trapped snake died', died + '/8', 'after', ticks.join(','), '| pulling on', Math.round(worst*100) + '% of ticks at worst | gentle start', gentle, '| phone out of step on', drift, 'ticks');
   if (died < 7 || drift || worst < 0.9 || !gentle) { console.log('FAIL squeeze'); process.exitCode = 1; } }
-// what is caught is squeezed too: a long snake whose head is in the ring but whose body trails away outside it is
-// hauled in whole, and after a few seconds none of it is left sticking out; a phone following along sees the same
-{ const q = (v) => Math.round(v*100)/100; let poke = 0, drift = 0, pulled = 0, n = 0, rammed = 0;
+// the ring is solid: a long snake lying curled inside it is pushed ahead of the ring as it draws in — the ring never
+// passes through its body, the body is never jerked or bunched up, and a phone following along sees the same
+{ const q = (v) => Math.round(v*100)/100; let through = 0, drift = 0, pulled = 0, n = 0, rammed = 0, jerk = 0, thin = 99;
   for (let seed = 1; seed <= 4; seed++) { const S = G.newGame(seed, { round: true }); S.tm = 0; const me = G.addSnake(S, 'me', 'Me', false); G.fillBots(S); const v = S.sn[1]; for (const s of S.sn.slice(2)) s.alive = false;
     const R = 7, L = Math.ceil(2*Math.PI*R/G.SEG) + 8; me.L = L; me.tr = []; for (let k = L; k >= 0; k--) { const a = k/(L - 8)*Math.PI*2; G.addHead(me, q(Math.cos(a)*R), q(Math.sin(a)*R)); } me.a = -Math.PI/2;
-    v.tr = []; v.L = 60; for (let k = 60; k >= 0; k--) { const rr = 3 + 0.5*k; G.addHead(v, q(Math.cos(2.4)*rr), q(Math.sin(2.4)*rr)); } v.a = 2.4 - Math.PI/2; v.ta = v.a;   // its body runs straight out through the ring, well ahead of my head
+    v.tr = []; v.L = 120; for (let k = 120; k >= 0; k--) { const rr = 3.2 + 2.1*k/120, a = -k*0.5/4.4; G.addHead(v, q(Math.cos(a)*rr), q(Math.sin(a)*rr)); } v.a = Math.PI/2; v.ta = v.a;   // curled inside, its older body close to the ring
     const M = G.mirror(); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, true)))); let t = 0, cc = [0, 0], cr = R, since = 0;
     while (v.alive && me.alive && t++ < 400) { const dx = me.x - cc[0], dz = me.z - cc[1], ang = Math.atan2(dz, dx); me.ta = ang - Math.PI/2 - Math.max(-0.5, Math.min(0.5, (Math.hypot(dx, dz) - cr)*0.5)); me.turn = 0;
-      v.ta = Math.atan2(v.z - cc[1], v.x - cc[0]) - Math.PI/2 - 0.35; v.turn = 0; if (v.ai) v.ai.think = S.tm + 99;   // the caught one keeps circling inside, away from the ring
+      const vr = Math.hypot(v.x - cc[0], v.z - cc[1]); v.ta = Math.atan2(v.z - cc[1], v.x - cc[0]) + Math.PI/2 + Math.max(-0.6, Math.min(0.6, (vr - 2.2)*0.6)); v.turn = 0; if (v.ai) v.ai.think = S.tm + 99;   // the caught one keeps circling in the middle
+      const before = v.tr.map((p) => p[0] + ',' + p[1]), pos = new Map(v.tr.map((p, i) => [i, p.slice()]));
       G.step(S); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, false))));
       const a = S.sn[1].tr, b = M.sn[1].tr; if (a.length !== b.length || a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1])) drift++;
       const e = S.ev.find((x) => x.t === 'sq' && x.i === 0); if (e) { cc = [e.cx, e.cz]; cr = e.r; pulled++; since++;
-        if (since > 60) for (const p of v.tr) { n++; if (Math.hypot(p[0] - e.cx, p[1] - e.cz) > e.r - 0.2) poke++; } } }
+        // no point of the body is moved more than a touch on one tick (the trail may have gained one new point at its head)
+        for (let i = 2; i < v.tr.length; i++) { const p = v.tr[i]; let near = 9; for (let j = Math.max(0, i - 3); j <= Math.min(before.length - 1, i + 1); j++) { const o = pos.get(j); near = Math.min(near, Math.hypot(p[0] - o[0], p[1] - o[1])); } if (near > G.PUSH + 0.03) jerk++; }
+        if (since > 50) { const ring = me.tr.slice(0, e.k + 1); for (const p of v.tr) { n++; let near = 9; for (const r of ring) near = Math.min(near, Math.hypot(p[0] - r[0], p[1] - r[1])); if (near < e.c - 0.2 && Math.hypot(p[0] - e.cx, p[1] - e.cz) < e.r + 0.25) through++; }
+          let len = 0; for (let i = 1; i < v.tr.length; i++) len += Math.hypot(v.tr[i][0] - v.tr[i - 1][0], v.tr[i][1] - v.tr[i - 1][1]); thin = Math.min(thin, len/(v.tr.length - 1)); } } }
     if (!me.alive) rammed++; }
-  console.log('squeeze gathers the caught body inside: sticking out on', poke, 'of', n, 'body points | pulled on', pulled, 'ticks | I ran into what I held', rammed, 'times | phone out of step on', drift, 'ticks');
-  if (poke || drift || rammed || pulled < 100 || !n) { console.log('FAIL squeeze of the caught body'); process.exitCode = 1; } }
+  console.log('squeeze pushes the caught body ahead of the ring: ring through the body on', through, 'of', n, 'points | jerks', jerk, '| body points stay', thin.toFixed(2), 'apart at least | pulled on', pulled, 'ticks | I ran into what I held', rammed, 'times | phone out of step on', drift, 'ticks');
+  if (through || drift || rammed || jerk || pulled < 100 || !n || thin < 0.35) { console.log('FAIL squeeze of the caught body'); process.exitCode = 1; } }
 
 // the tail: thin at the tip in the picture, so thin for collisions too. Passing a tail tip at a distance that
 // would hit the thick part of the body is a miss; touching the tip itself is still a hit.
