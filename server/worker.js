@@ -48,7 +48,7 @@ export class Room {
     if (!here.includes(id) && here.length >= MAXP) { this.send(server, { t: 'full' }); try { server.close(4002, 'full'); } catch (e) {} return new Response(null, { status: 101, webSocket: client }); }
     // the same person from a second window: the older one goes
     for (const [ws, v] of this.socks) if (v.id === id) { this.send(ws, { t: 'bye', why: 'again' }); try { ws.close(4000, 'again'); } catch (e) {} this.socks.delete(ws); }
-    this.socks.set(server, { id, name, seen: Date.now() }); this.sweepOn();
+    this.socks.set(server, { id, name, seen: Date.now(), cover: 4, lag: false }); this.sweepOn();
     this.room = request.headers.get('X-Room') || this.room;
     if (!this.S) { this.S = G.newGame(Date.now() & 0x7fffffff); G.fillBots(this.S); this.k = 0; this.acc = 0; this.last = Date.now(); this.run(); }
     // back after a dropped connection: the same snake, handed back from the autopilot. Back into a world that was
@@ -89,9 +89,15 @@ export class Room {
   tick() {
     const S = this.S; if (!S) return this.stop();
     // real time, whatever the timer does: catch up by whole ticks, every one of them sent, since phones rebuild bodies from them
-    const t = Date.now(); this.acc += Math.min(500, t - this.last); this.last = t;
+    const t = Date.now(), real = Math.min(500, t - this.last)/1000; this.acc += Math.min(500, t - this.last); this.last = t;
     let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); if (this.k % 600 === 0) this.report();
       for (const e of S.ev) if (e.t === 'die' && S.sn[e.i] && !S.sn[e.i].bot) this.dead.set(S.sn[e.i].id, Date.now()); }
+    // Phones say something at least every 150 ms. One the game has not heard for 300 ms has a failing connection: its
+    // snake is covered (blinking, cannot crash or be hit) until it is heard again. Each player has 4 s of cover, slowly
+    // refilled, so going quiet on purpose is not a way to play. A snake whose owner dropped out is covered while it waits.
+    for (const v of this.socks.values()) { if (t - v.seen > 300) { if (v.cover > 0 && G.shield(S, v.id, 0.25)) { v.cover -= real; v.lag = true; } }
+      else { v.cover = Math.min(4, v.cover + real*0.15); if (v.lag) { v.lag = false; G.shield(S, v.id, 0.5); } } }
+    for (const id of this.away.keys()) G.shield(S, id, 0.25);
     // people who dropped and did not come back within 12 s: their snake goes; an arena nobody is coming back to closes
     if (this.k % 20 === 0 && this.away.size) { for (const [id, at] of this.away) if (t - at > 12000 || !S.sn.some((s) => s.alive && s.id === id)) { G.removeHuman(S, id); this.away.delete(id); } if (!this.socks.size && !this.away.size) this.shut(); }
   }

@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.29';
+import * as G from './sim.js?v=1.30';
 
-export const VERSION = '1.29';
+export const VERSION = '1.30';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -196,6 +196,7 @@ function showDeath() {
   const top = M.sn.filter((o) => o.alive).sort((a, b) => b.L - a.L).slice(0, 5);
   $('res').innerHTML = '<div class="me"><span class="n">📏 ' + DEATH.L + ' · 💥 ' + DEATH.kills + ' · ⏱ ' + m + ':' + String(sec).padStart(2, '0') + '</span><span class="s">' + DEATH.rank + ' место из ' + DEATH.of + '</span></div>'
     + '<p class="lb">Сейчас на арене лучшие:</p>' + top.map((r, k) => '<div><span class="p">' + (k + 1) + '</span><i style="color:' + hex(G.COLORS[r.col % G.COLORS.length]) + '"></i><span class="n' + (r.bot ? '' : ' hum') + '">' + (r.bot ? '' : '★ ') + esc(r.name) + '</span><span class="s">📏 ' + Math.floor(r.L) + '</span></div>').join('');
+  if (MODE === 'net' && NET) $('res').innerHTML += '<p class="lb">📶 пинг ' + (NET.diedPing || Math.round(RTT*1000)) + ' мс' + (NET.diedLag ? ' · в момент гибели связь тормозила' : '') + '</p>';
   $('oInvite').classList.toggle('hidden', MODE !== 'net' || !!(NET && NET.pub));
 }
 function applySnap(o) {
@@ -213,7 +214,7 @@ function onEvent(e) {
   if (e.t === 'spawn') { if (e.w[0] === ME && MODE !== 'demo') born(); return; }
   if (e.t === 'die') { const s = M.sn[e.i]; if (!s) return; const col = G.COLORS[s.col % G.COLORS.length]; burst(e.x, e.z, col, 70);
     const by = e.by >= 0 ? M.sn[e.by] : null; if (by) by.kills = (by.kills || 0) + 1;
-    if (s.id === ME && NET) NET.tok = null;
+    if (s.id === ME && NET) { NET.tok = null; NET.diedLag = NET.badAt && performance.now() - NET.badAt < 2500; NET.diedPing = Math.round(RTT*1000); }
     if (s.id === ME && MODE !== 'demo') { DEATH = { L: Math.floor(s.L), kills: s.kills || 0, t: M.tm - (BORN || 0), by: by ? by.name : '', rank: 1 + M.sn.filter((o) => o.alive && o.L > s.L).length, of: M.sn.filter((o) => o.alive).length + 1 }; clearTimeout(deathT); deathT = setTimeout(showDeath, 1400); }
     if (MODE !== 'demo') { feed(by ? nameOf(by) + ' → ' + nameOf(s) : nameOf(s) + ' разбил' + (s.id === ME ? 'ся' : 'ся') + ' о стену', s.id === ME || (by && by.id === ME));
       const me = meS(); const dist = me ? Math.hypot(me.x - e.x, me.z - e.z) : 99;
@@ -401,6 +402,9 @@ function hud(dt) {
   hudT -= dt; if (hudT > 0 || MODE === 'demo') return; hudT = 0.2;
 
   const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + (MODE === 'net' && NET && NET.players ? (NET.pub ? ' · 🌍 ' : ' · 👥 ') + NET.players.length : '');
+  // the connection, when it matters: nothing heard for a moment, or a slow line
+  { const lc = $('lag'); let txt = ''; if (MODE === 'net' && NET) { const quiet = NET.heard ? performance.now() - NET.heard : 0; if (!NET.ws || NET.ws.readyState !== 1 || quiet > 400) { txt = '📶 нет связи…'; NET.badAt = performance.now(); } else if (RTT > 0.3) { txt = '📶 ' + Math.round(RTT*1000) + ' мс'; NET.badAt = performance.now(); } }
+    if (lc.textContent !== txt) lc.textContent = txt; lc.style.display = txt ? 'block' : 'none'; }
   const me = meS(); $('hLen').textContent = me ? (me.alive ? '📏 ' + Math.floor(me.L) : '👀 смотришь') : '';
   // the eight longest, and every real person on the arena whatever their length (you included)
   const all = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L), rows = all.slice(0, 8); for (const s of all) if (!s.bot && !rows.includes(s) && rows.length < 13) rows.push(s);
@@ -476,6 +480,8 @@ function netJoin(room) {
     ws.onopen = () => { N.tries = 0; };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } netMsg(N, m); };
     ws.onclose = (e) => { if (NET !== N) return; if (e.code === 4000) { toast('Ты зашёл в эту комнату с другого устройства', 3000); goHome(); return; } if (++N.tries > 10) { toast('Нет связи с ареной', 3000); goHome(); return; } if (N.tries === 1) toast('Связь прервалась — возвращаюсь…', 4000); setTimeout(open, N.tries === 1 ? 200 : Math.min(3000, 700*(N.tries - 1))); }; };
+  // a word every 150 ms so the game knows this phone is still there (silence means a failing connection, and gets the snake covered)
+  N.beat = setInterval(() => { if (N.ws && N.ws.readyState === 1) N.ws.send('{"t":"hb"}'); }, 150);
   open(); N.ping = setInterval(() => { if (N.ws && N.ws.readyState === 1) N.ws.send(JSON.stringify({ t: 'ping', k: performance.now() })); }, 2000);
 }
 function netMsg(N, m) {
@@ -484,7 +490,7 @@ function netMsg(N, m) {
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
   else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;
     for (const p of m.players) if (before.length && !before.includes(p.id) && p.id !== N.me) feed('👋 ' + p.name + ' зашёл на арену'); }
-  else if (m.t === 's') netSnap(m.s);
+  else if (m.t === 's') { N.heard = performance.now(); netSnap(m.s); }
 }
 // phones get ticks unevenly over the air; play them back a couple of ticks late, at an even pace
 function netSnap(s) {
@@ -501,7 +507,7 @@ function netPlay(dt) {
   while (Q.length && Q[0].tm <= playTick) applySnap(Q.shift());
   ALPHA = Math.max(0, Math.min(1, playTick - curTick));
 }
-function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); try { if (N.ws && N.ws.readyState === 1) N.ws.send('{"t":"bye"}'); N.ws && N.ws.close(); } catch (e) {} }
+function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); clearInterval(N.beat); try { if (N.ws && N.ws.readyState === 1) N.ws.send('{"t":"bye"}'); N.ws && N.ws.close(); } catch (e) {} }
 // online: the matchmaker sends you to a public arena with other people in it
 async function netOnline() {
   if (!initStr()) { toast('Онлайн — внутри Telegram: @' + BOT + '. Пока — с ботами', 3000); $('goSolo').onclick(); return; }

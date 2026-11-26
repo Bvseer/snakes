@@ -76,6 +76,9 @@ function addBot(S) { const k = botNo++, taken = new Set(S.sn.filter((o) => o.ali
   return addSnake(S, 'bot' + k + '_' + Math.floor(S.rnd()*1e6), pool[Math.floor(S.rnd()*pool.length)], true); }
 export function fillBots(S) { if (S.round) { let k = 0; const from = Math.floor(S.rnd()*8); while (S.sn.length < ROUNDS) { addSnake(S, 'bot' + k, BOTS[(from + k) % 8], true); k++; } return; }
   while (S.sn.filter((o) => o.alive).length < BOTMIN && addBot(S)); }
+// The game cannot hear a person's phone (a slow or broken connection): their snake blinks and cannot crash or be hit
+// until it can. Whoever calls this decides for how long in total.
+export function shield(S, id, sec) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (s) { s.safe = Math.max(s.safe || 0, S.tm + sec); s.boost = false; } return !!s; }   // and it stops dashing: nobody is there to want it
 // A person's connection dropped: their snake is not thrown away, a bot's brain keeps it out of trouble until they are back.
 export function autopilot(S, id, on) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (!s) return false;
   s.auto = !!on; if (on && !s.ai) s.ai = { skill: 0.9, goal: null, think: 0, hunt: 0, v: 2 }; if (!on) { s.boost = false; s.turn = 0; s.ta = s.a; } return true; }
@@ -123,7 +126,7 @@ function pickGoal(S, s, A) {
   for (const f of S.food) { if (!(f[4] >= 0 && S.tm - f[4] < 8)) continue; const dx = f[1] - s.x, dz = f[2] - s.z, d2 = dx*dx + dz*dz; if (d2 < sight*sight && d2 < cd) { cd = d2; best = [f[1], f[2]]; } }
   if (best) { A.goal = best; A.boostWant = cd > 30; return; }
   // 2. someone to cut off: get to a point ahead of their head before they do, then cross it
-  if (s.L > LMIN + 8 && S.rnd() < 0.35 + A.skill*0.45) {
+  if (!s.auto && s.L > LMIN + 8 && S.rnd() < 0.35 + A.skill*0.45) {
     let pick = null, ps = 0;
     for (const o of S.sn) { if (o === s || !o.alive) continue; const dx = o.x - s.x, dz = o.z - s.z, d = Math.hypot(dx, dz); if (d > 18 || d < 2) continue;
       const lead = 3 + d*0.45, px = o.x + Math.cos(o.a)*lead, pz = o.z + Math.sin(o.a)*lead; if (Math.hypot(px, pz) > S.R - 3) continue;
@@ -156,7 +159,7 @@ function think2(S, s, g) {
   s.ta = wrap(pick);
   // dash: to cut someone off or reach remains, or to get out of a closing trap, but only if the dash itself is safe
   const canDash = s.L > LMIN + 5;
-  s.boost = canDash && ((A.boostWant && Math.abs(wrap(pick - want)) < 0.45) || pickT < H*0.6) && fly(pick, true) === Infinity;
+  s.boost = !s.auto && canDash && ((A.boostWant && Math.abs(wrap(pick - want)) < 0.45) || pickT < H*0.6) && fly(pick, true) === Infinity;   // someone's snake on autopilot never spends their length
 }
 
 // ---- the squeeze ------------------------------------------------------------
@@ -246,6 +249,8 @@ function stepIn(S) {
   for (const s of S.sn) if (s.alive && (s.bot || s.auto)) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
   for (const s of S.sn) { if (!s.alive) continue;
+    // a blinking snake (newborn, or its owner's connection is failing) cannot defend itself: it is turned away from the wall
+    if (s.safe > S.tm && s.x*s.x + s.z*s.z > (S.R - 8)*(S.R - 8)) { s.turn = 0; s.ta = Math.atan2(-s.z, -s.x); s.boost = false; }
     const boost = s.boost && s.L > LMIN, turn = TURN*(boost ? 0.8 : 1)*TICK;
     if (s.turn) { s.a = wrap(s.a + s.turn*turn); s.ta = s.a; }
     else { const d = wrap(s.ta - s.a); s.a = wrap(s.a + Math.max(-turn, Math.min(turn, d))); }
@@ -253,7 +258,8 @@ function stepIn(S) {
     if (boost) { s.L = q(s.L - 1.6*TICK); s.dropT += TICK; if (s.dropT > 0.35) { s.dropT = 0; const p = s.tr[s.tr.length - 1]; food(S, p[0], p[1], 0.5); } }
     s.boosting = boost;
   }
-  for (const s of S.sn) if (s.alive && s.safe && s.safe <= S.tm) s.safe = S.tm - s.born < 6 && overlaps(S, s) ? S.tm + 0.3 : 0;
+  // the blinking ends only once the snake is clear of everyone (for a few seconds at most), never while lying across someone
+  for (const s of S.sn) if (s.alive && s.safe && s.safe <= S.tm) { if (overlaps(S, s) && (s.ext = (s.ext || 0) + 1) <= 20) s.safe = S.tm + 0.3; else { s.safe = 0; s.ext = 0; } }
   for (const s of S.sn) if (s.alive) coil(S, s);
   // who hit whom this tick. Ramming someone's side right behind their head brings your head next to theirs too:
   // then only the one who did the ramming dies. Two snakes meeting head to head: the shorter one goes (both if equal).
