@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.30';
+import * as G from './sim.js?v=1.31';
 
-export const VERSION = '1.30';
+const VERSION = G.VERSION;
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -310,7 +310,7 @@ const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); le
 // they were a moment ago. That gap (a couple of body widths at speed) is what made near misses count as crashes.
 // So the others are carried forward by the same amount along the way they are going: their bodies follow the true
 // path, only the last stretch in front of the head is an estimate, eased so it does not twitch.
-function leadTime() { return MODE === 'net' ? Math.min(0.25, 0.09 + RTT) : MODE === 'solo' ? G.TICK : 0; }
+function leadTime() { return MODE === 'solo' ? G.TICK : 0; }   // online the others are drawn exactly as the game sent them: carrying them forward made their heads twitch
 function ahead(v, s, bx, bz, dt, lead) {
   const E = v.ex || (v.ex = { own: false, id: null, om: 0, sp: G.V, path: [], bx: 0, bz: 0, ba: 0, x: 0, z: 0, a: 0 });
   const pa = Number.isFinite(s.pa) ? s.pa : s.a, om = Math.max(-G.TURN, Math.min(G.TURN, wrapA(s.a - pa)/G.TICK)), sp = s.boosting ? G.VB : G.V;
@@ -485,7 +485,7 @@ function netJoin(room) {
   open(); N.ping = setInterval(() => { if (N.ws && N.ws.readyState === 1) N.ws.send(JSON.stringify({ t: 'ping', k: performance.now() })); }, 2000);
 }
 function netMsg(N, m) {
-  if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; N.fresh = true; if (N.joined) toast(m.kept === 1 ? 'Связь вернулась — змейка твоя' : m.kept === 2 ? 'Арена перезапустилась — длина сохранена' : 'Связь вернулась', 2500); N.joined = true; }
+  if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; N.fresh = true; if (m.sv && m.sv !== VERSION && !N.told) { N.told = true; setTimeout(() => toast('Вышла версия ' + m.sv + ' — закрой и открой игру, когда будет удобно', 6000), 3000); } if (N.joined) toast(m.kept === 1 ? 'Связь вернулась — змейка твоя' : m.kept === 2 ? 'Арена перезапустилась — длина сохранена' : 'Связь вернулась', 2500); N.joined = true; }
   else if (m.t === 'pong') { if (m.tok) N.tok = m.tok; if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
   else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;

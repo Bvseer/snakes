@@ -1,6 +1,7 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
+export const VERSION = '1.31';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time

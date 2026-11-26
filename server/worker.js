@@ -55,7 +55,7 @@ export class Room {
     // restarted meanwhile: a new snake with the length the receipt vouches for.
     const had = this.S.sn.some((s) => s.alive && s.id === id); this.away.delete(id);
     G.spawnHuman(this.S, id, name); if (had) G.autopilot(this.S, id, false); else if (back) G.restore(this.S, id, back.L, back.kills);
-    this.send(server, { t: 'hello', me: id, kept: had ? 1 : back ? 2 : 0, pub: isPublic(this.room || '') }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby()); this.report();
+    this.send(server, { t: 'hello', me: id, sv: G.VERSION, kept: had ? 1 : back ? 2 : 0, pub: isPublic(this.room || '') }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby()); this.report();
     server.addEventListener('message', (e) => this.onMessage(server, e.data));
     const gone = () => this.leave(server); server.addEventListener('close', gone); server.addEventListener('error', gone);
     return new Response(null, { status: 101, webSocket: client });
@@ -65,6 +65,7 @@ export class Room {
     if (m.t === 'in' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
     else if ((m.t === 'spawn' || m.t === 'start') && this.S) G.spawnHuman(this.S, me.id, me.name);   // back in after a crash
     else if (m.t === 'ping') this.pong(ws, me, +m.k || 0);
+    else if (m.t === 'hb') me.hb = true;      // this page sends a heartbeat: its silence means something
     else if (m.t === 'bye') me.bye = true;   // leaving on purpose: no waiting for them to come back
   }
   // a public arena keeps the matchmaker up to date with how many people are in it
@@ -92,10 +93,10 @@ export class Room {
     const t = Date.now(), real = Math.min(500, t - this.last)/1000; this.acc += Math.min(500, t - this.last); this.last = t;
     let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); if (this.k % 600 === 0) this.report();
       for (const e of S.ev) if (e.t === 'die' && S.sn[e.i] && !S.sn[e.i].bot) this.dead.set(S.sn[e.i].id, Date.now()); }
-    // Phones say something at least every 150 ms. One the game has not heard for 300 ms has a failing connection: its
+    // Phones say something at least every 150 ms. One the game has not heard for 700 ms has a failing connection: its
     // snake is covered (blinking, cannot crash or be hit) until it is heard again. Each player has 4 s of cover, slowly
     // refilled, so going quiet on purpose is not a way to play. A snake whose owner dropped out is covered while it waits.
-    for (const v of this.socks.values()) { if (t - v.seen > 300) { if (v.cover > 0 && G.shield(S, v.id, 0.25)) { v.cover -= real; v.lag = true; } }
+    for (const v of this.socks.values()) { if (!v.hb) continue; if (t - v.seen > 700) { if (v.cover > 0 && G.shield(S, v.id, 0.25)) { v.cover -= real; v.lag = true; } }
       else { v.cover = Math.min(4, v.cover + real*0.15); if (v.lag) { v.lag = false; G.shield(S, v.id, 0.5); } } }
     for (const id of this.away.keys()) G.shield(S, id, 0.25);
     // people who dropped and did not come back within 12 s: their snake goes; an arena nobody is coming back to closes
