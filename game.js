@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.25';
+import * as G from './sim.js?v=1.26';
 
-export const VERSION = '1.25';
+export const VERSION = '1.26';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -60,7 +60,7 @@ const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.2, 96, 1, true), 
 const MAXPT = 720, RING = 8;
 const tubeVS = `attribute float aU; varying vec3 vN, vV, vW; varying float vU;
   void main(){ vU = aU; vW = normal; vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalMatrix*normal; vV = -mv.xyz; gl_Position = projectionMatrix*mv; }`;
-const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade; varying vec3 vN, vV, vW; varying float vU;
+const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade, uSq; varying vec3 vN, vV, vW; varying float vU;
   void main(){
     float f = 1.-abs(dot(normalize(vN), normalize(vV)));
     float stripe = smoothstep(.35,.65,.5+.5*sin(vU*1.3 - uTime*(2.5+uBoost*14.)));
@@ -68,6 +68,7 @@ const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade; varying v
     c += vec3(1.)*pow(1.-f,3.)*(.14+.08*stripe);
     c += uCol*pow(f,2.)*.55;
     c += vec3(1.)*pow(max(vW.y,0.),12.)*.12;
+    c += uCol*uSq*(.16+.2*smoothstep(.2,1.,sin(vU*1.1 + uTime*7.)));   // tightening a coil: slow bright waves run down the body
     gl_FragColor = vec4(c*uFade, 1.);
   }`;
 function tubeIndex() { const idx = []; for (let i = 0; i < MAXPT - 1; i++) for (let k = 0; k < RING; k++) { const a = i*RING + k, b = i*RING + (k + 1)%RING, c = a + RING, d = b + RING; idx.push(a, b, c, b, d, c); } return idx; }
@@ -90,11 +91,31 @@ function vis(i) {
   g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(MAXPT*RING*3), 3).setUsage(THREE.DynamicDrawUsage));
   g.setAttribute('aU', new THREE.BufferAttribute(new Float32Array(MAXPT*RING), 1).setUsage(THREE.DynamicDrawUsage));
   g.setIndex(IDX); g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
-  const mat = new THREE.ShaderMaterial({ uniforms: { uCol: { value: new THREE.Color() }, uTime: U.time, uBoost: { value: 0 }, uFade: { value: 1 } }, vertexShader: tubeVS, fragmentShader: tubeFS });
+  const mat = new THREE.ShaderMaterial({ uniforms: { uCol: { value: new THREE.Color() }, uTime: U.time, uBoost: { value: 0 }, uFade: { value: 1 }, uSq: { value: 0 } }, vertexShader: tubeVS, fragmentShader: tubeFS });
   const body = new THREE.Mesh(g, mat); body.frustumCulled = false;
   const head = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mat);
   scene.add(body, head);
-  return VIS[i] = { body, head, mat, g, tag: null, tagName: '' };
+  return VIS[i] = { body, head, mat, g, tag: null, tagName: '', fan: null, sqA: 0 };
+}
+
+const FANMAX = 64;
+const fanVS = `attribute float aR; varying float vR; void main(){ vR = aR; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`;
+const fanFS = `uniform vec3 uCol; uniform float uTime, uA; varying float vR;
+  void main(){ float rim = pow(vR, 2.2), wave = smoothstep(.55,1.,sin(vR*13. + uTime*5.))*vR; gl_FragColor = vec4(uCol*(.05 + .22*rim + .13*wave)*uA, 1.); }`;
+function fanFor(v) {
+  if (v.fan) return v.fan;
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((FANMAX + 2)*3), 3).setUsage(THREE.DynamicDrawUsage));
+  const aR = new Float32Array(FANMAX + 2).fill(1); aR[0] = 0; geo.setAttribute('aR', new THREE.BufferAttribute(aR, 1));
+  const idx = []; for (let i = 1; i <= FANMAX; i++) idx.push(0, i, i + 1); geo.setIndex(idx); geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
+  const mat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uCol: v.mat.uniforms.uCol, uTime: U.time, uA: { value: 0 } }, vertexShader: fanVS, fragmentShader: fanFS });
+  v.fan = new THREE.Mesh(geo, mat); v.fan.frustumCulled = false; v.fan.renderOrder = 2; scene.add(v.fan); return v.fan;
+}
+// the stretch of body PX/PZ[0..n] becomes the rim of the disc
+function fanBuild(v, n, cx, cz) {
+  const f = fanFor(v), P = f.geometry.attributes.position.array, m = Math.min(FANMAX, n + 1); P[0] = cx; P[1] = 0.05; P[2] = cz;
+  for (let j = 0; j < m; j++) { const k = Math.round(j*n/Math.max(1, m - 1)); P[(j + 1)*3] = PX[k]; P[(j + 1)*3 + 1] = 0.05; P[(j + 1)*3 + 2] = PZ[k]; }
+  P[(m + 1)*3] = PX[0]; P[(m + 1)*3 + 1] = 0.05; P[(m + 1)*3 + 2] = PZ[0];
+  const a = f.geometry.attributes.position; a.clearUpdateRanges(); a.addUpdateRange(0, (m + 2)*3); a.needsUpdate = true; f.geometry.setDrawRange(0, m*3);
 }
 
 // glow: soft additive dots along every body and around every light on the floor
@@ -232,11 +253,14 @@ function predFrame(dt) {
 
 // ---- drawing a frame -------------------------------------------------------
 const tmpC = new THREE.Color();
+let RINGN = -1;   // how far along the drawn body the coil goes
 const PX = new Float32Array(MAXPT), PZ = new Float32Array(MAXPT), PU = new Float32Array(MAXPT);
 // the body from the drawn head back along the laid points, cut at exactly its length so the tail glides instead of hopping
 function buildTube(v, s, hx, hz, L, r, pre) {
   const P = v.g.attributes.position.array, N = v.g.attributes.normal.array, A = v.g.attributes.aU.array;
   const fx = Math.cos(s.a), fz = Math.sin(s.a), tr = s.tr, want = L*G.SEG;
+  // a coil that tightened on this tick is drawn part of the way there, so it glides in instead of stepping 20 times a second
+  const sq = s.sq, pull = sq && sq.tm === curTick && sq.f < 1 ? 1 + (1/sq.f - 1)*(1 - ALPHA) : 1; RINGN = -1;
   let n = 1, cum = 0, k = 0; PX[0] = hx; PZ[0] = hz;
   // your own snake: the path the phone predicted, newest first, then where the game last put the head
   let bx = hx, bz = hz, bfx = fx, bfz = fz;
@@ -248,7 +272,8 @@ function buildTube(v, s, hx, hz, L, r, pre) {
   const baseU = ((s.n || 0) - k + 1)*G.SEG + (k < tr.length ? Math.hypot(tr[k][0] - bx, tr[k][1] - bz) : 0);
   PU[0] = baseU + cum; for (let j = 1, run = 0; j < n; j++) { run += Math.hypot(PX[j] - PX[j - 1], PZ[j] - PZ[j - 1]); PU[j] = baseU + cum - run; }
   for (; k < tr.length && n < MAXPT; k++) {
-    const x = tr[k][0], z = tr[k][1], d = Math.hypot(x - PX[n - 1], z - PZ[n - 1]);
+    let x = tr[k][0], z = tr[k][1]; if (sq && k <= sq.k) { if (pull !== 1) { x = sq.cx + (x - sq.cx)*pull; z = sq.cz + (z - sq.cz)*pull; } RINGN = n; }
+    const d = Math.hypot(x - PX[n - 1], z - PZ[n - 1]);
     if (cum + d >= want) { const f = d > 0 ? (want - cum)/d : 0; PX[n] = PX[n - 1] + (x - PX[n - 1])*f; PZ[n] = PZ[n - 1] + (z - PZ[n - 1])*f; PU[n] = PU[n - 1] - d*f; cum = want; n++; break; }
     cum += d; PX[n] = x; PZ[n] = z; PU[n] = ((s.n || 0) - k)*G.SEG; n++;
   }
@@ -274,15 +299,31 @@ function glowAt(x, y, z, col, size) { if (gi >= GLOWN) return; GP[gi*3] = x; GP[
 // a snake whose whole body is far from what the camera sees is not built at all this frame
 function near(s) { const reach = camH*1.3 + s.L*G.SEG + 4; return Math.abs(s.x - camT.x) < reach && Math.abs(s.z - camT.z) < reach; }
 const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); let camH = 30, follow = -1;
+// being in a coil, or holding one, is felt: a word when it starts, a pulse at the screen's edge for the one inside,
+// a low beat that rises as the coil tightens, and the camera leans in a little
+const COIL = { role: null, was: null, name: '', tight: 0, endT: 0, beatT: 0, zoom: 1, cx: 0, cz: 0, r: 0, look: 0, fit: 0 };
+function coilFeel(dt) {
+  const now = performance.now(), role = COIL.role;
+  if (role && !COIL.was && now - COIL.endT > 900) {
+    if (role === 'prey') { big('Тебя душат!<small>' + esc(COIL.name) + ' сжимает кольцо — вырывайся</small>', 1000); haptic('heavy'); }
+    else { big('Кольцо сжимается<small>держи ' + esc(COIL.name || 'змейку') + ' внутри</small>', 900); haptic('medium'); } }
+  if (!role && COIL.was) COIL.endT = now;
+  COIL.was = role;
+  $('danger').style.opacity = role === 'prey' ? (0.45 + 0.45*COIL.tight)*(0.75 + 0.25*Math.sin(now/140)) : 0;
+  if (role && now - COIL.beatT > 420 - 170*COIL.tight) { COIL.beatT = now; if (role === 'prey') { beep(64 + 40*COIL.tight, 0.2, 'sine', 0.11, 38); haptic('light'); } else beep(120 + 110*COIL.tight, 0.14, 'triangle', 0.035, 90); }
+  // both of them see the whole coil: the camera eases over towards its middle and pulls back far enough to fit it
+  COIL.look += ((role === 'coil' ? 0.6 : role === 'prey' ? 0.45 : 0) - COIL.look)*Math.min(1, dt*2.5); COIL.fit += ((role ? COIL.r*3.8 + 3 : 0) - COIL.fit)*Math.min(1, dt*2.5);
+}
 function drawWorld(dt) {
   const al = ALPHA;
   floorMat.uniforms.uR.value = M.R; edgeAt(M.R); wall.scale.set(M.R, 1, M.R);
   const warn = !M.fixed && M.tm > G.SHRINK - 3 && M.R > G.RMIN + 0.01 ? 1 : 0; floorMat.uniforms.uWarn.value += (warn - floorMat.uniforms.uWarn.value)*Math.min(1, dt*3); wallMat.uniforms.uWarn.value = floorMat.uniforms.uWarn.value;
-  gi = 0; ei = 0;
+  gi = 0; ei = 0; COIL.role = null;
   HEAD.ok = false;
   M.sn.forEach((s, i) => {
     const v = vis(i), col = G.COLORS[s.col % G.COLORS.length]; v.mat.uniforms.uCol.value.setHex(col);
     const show = s.alive && near(s); v.body.visible = v.head.visible = show;
+    if (!show) { v.sqA = 0; if (v.fan) v.fan.visible = false; }
     if (v.tag) v.tag.visible = false;
     if (!show) return;
     const mine = s.id === ME && PRED.ok;
@@ -291,6 +332,15 @@ function drawWorld(dt) {
     v.mat.uniforms.uBoost.value += ((s.boosting ? 1 : 0) - v.mat.uniforms.uBoost.value)*Math.min(1, dt*8);
     v.mat.uniforms.uFade.value = s.safe ? 0.45 + 0.4*Math.abs(Math.sin(performance.now()/90)) : 1;   // just born: blinking, cannot be hit
     const np = buildTube(v, s, hx, hz, Lr, r, mine ? PRED : null);
+    // tightening a coil around someone: the floor inside lights up, the body pulses, sparks are drawn inwards
+    const sq = s.sq, coiling = !!sq && curTick - sq.tm <= 2 && RINGN > 6;
+    v.sqA += ((coiling ? 1 : 0) - v.sqA)*Math.min(1, dt*(coiling ? 5 : 7)); v.mat.uniforms.uSq.value = v.sqA;
+    if (coiling) { const tight = Math.max(0, Math.min(1, (8 - sq.r)/5.5)), prey = M.sn[sq.v];
+      fanBuild(v, RINGN, sq.cx, sq.cz); v.fan.material.uniforms.uA.value = v.sqA*(0.55 + 0.6*tight);
+      if (QL > 0 && Math.random() < 0.45) { const j = Math.floor(Math.random()*RINGN), dx = sq.cx - PX[j], dz = sq.cz - PZ[j], d = Math.hypot(dx, dz) || 1, sp = 2.5 + Math.random()*3; spark(PX[j], 0.5, PZ[j], dx/d*sp, 1.4, dz/d*sp, col, 0.4, 0.38); }
+      if (MODE !== 'demo') { if (prey && prey.alive && prey.id === ME) { COIL.role = 'prey'; COIL.name = s.name; COIL.tight = tight; COIL.cx = sq.cx; COIL.cz = sq.cz; COIL.r = sq.r; } else if (s.id === ME && COIL.role !== 'prey') { COIL.role = 'coil'; COIL.name = prey ? prey.name : ''; COIL.tight = tight; COIL.cx = sq.cx; COIL.cz = sq.cz; COIL.r = sq.r; } } }
+    else if (v.fan) v.fan.material.uniforms.uA.value = v.sqA*0.55;
+    if (v.fan) v.fan.visible = v.sqA > 0.02;
     const hr = r*1.18; v.head.position.set(hx, r*0.95, hz); v.head.scale.setScalar(hr);
     const ha = mine ? PRED.a : s.a, fx = Math.cos(ha), fz = Math.sin(ha), sx = -fz, sz = fx;
     for (let k = 0; k < 2; k++) { const side = k ? 1 : -1, ex = hx + fx*hr*0.45 + sx*side*hr*0.5, ez = hz + fz*hr*0.45 + sz*side*hr*0.5, ey = r*0.95 + hr*0.55, a = hr*0.34, b = hr*0.19;
@@ -301,7 +351,8 @@ function drawWorld(dt) {
     if (s.boosting && Math.random() < (QL > 0 ? 0.6 : 0.25)) spark(PX[np - 1], r, PZ[np - 1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45);
     if (MODE !== 'demo' && s.id !== ME) { if (!v.tag || v.tagName !== s.name) { if (v.tag) scene.remove(v.tag); v.tag = label(s.name, col); v.tagName = s.name; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + 2.2, hz); }
   });
-  for (let i = M.sn.length; i < VIS.length; i++) { const v = VIS[i]; if (!v) continue; v.body.visible = v.head.visible = false; if (v.tag) v.tag.visible = false; }
+  for (let i = M.sn.length; i < VIS.length; i++) { const v = VIS[i]; if (!v) continue; v.body.visible = v.head.visible = false; if (v.tag) v.tag.visible = false; if (v.fan) v.fan.visible = false; }
+  coilFeel(dt);
   EYEW.count = EYEB.count = ei; EYEW.instanceMatrix.needsUpdate = EYEB.instanceMatrix.needsUpdate = true;
   glowG.setDrawRange(0, gi); upd(glowG, gi);
 
@@ -320,8 +371,9 @@ function drawWorld(dt) {
   // the camera follows you; once you are out, whoever is longest
   const me = meS(); let tgt = me && me.alive ? me : null;
   if (!tgt) { const alive = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L); tgt = alive.find((s) => s.i === follow) || alive[0]; }
-  if (tgt) { follow = tgt.i; const pm = tgt.id === ME && PRED.ok, hx = pm ? PRED.x : tgt.px + (tgt.x - tgt.px)*al, hz = pm ? PRED.z : tgt.pz + (tgt.z - tgt.pz)*al; const kk = 1 - Math.exp(-dt*(MODE === 'demo' ? 1.5 : 10)); camT.x += (hx - camT.x)*kk; camT.z += (hz - camT.z)*kk;
-    const want = (MODE === 'demo' ? 40 : 21) + Math.min(20, tgt.L*0.06); camH += (want - camH)*Math.min(1, dt*2); }
+  if (tgt) { follow = tgt.i; const pm = tgt.id === ME && PRED.ok; let hx = pm ? PRED.x : tgt.px + (tgt.x - tgt.px)*al, hz = pm ? PRED.z : tgt.pz + (tgt.z - tgt.pz)*al;
+    if (COIL.look > 0.01 && tgt.id === ME) { hx += (COIL.cx - hx)*COIL.look; hz += (COIL.cz - hz)*COIL.look; } const kk = 1 - Math.exp(-dt*(MODE === 'demo' ? 1.5 : 10)); camT.x += (hx - camT.x)*kk; camT.z += (hz - camT.z)*kk;
+    const want = Math.max(((MODE === 'demo' ? 40 : 21) + Math.min(20, tgt.L*0.06))*COIL.zoom, tgt.id === ME ? COIL.fit : 0); camH += (want - camH)*Math.min(1, dt*2); }
   camP.set(camT.x, camH, camT.z + camH*0.5); cam.position.copy(camP); cam.lookAt(camT.x, 0, camT.z - 2);
   SCALE.value = innerHeight*DPR/(2*Math.tan(cam.fov*Math.PI/360));
 }
@@ -493,4 +545,4 @@ $('ver').textContent = 'v' + VERSION; $('ver').style.pointerEvents = 'auto';
 $('ver').addEventListener('pointerdown', (e) => { e.stopPropagation(); const t = performance.now(); verTaps = t - verT < 600 ? verTaps + 1 : 1; verT = t; if (verTaps >= 3) { STATS = !STATS; verTaps = 0; if (!STATS) $('ver').textContent = 'v' + VERSION; } });
 newLocal(false); burst(0, 0, 0xffffff, 1); try { R.compile(scene, cam); } catch (e) {} show('home'); $('load').style.display = 'none'; requestAnimationFrame(loop);
 const sp = zt().start || (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || '', rm = /^r_([a-z0-9]{6,12})$/.exec(sp); if (rm && initStr()) netJoin(rm[1]);
-window.__hide = (k) => { const o = { floor, wall, glow, food: foodPts, sparks: spPts }[k]; if (o) o.visible = false; if (k === 'snakes') VIS.forEach((v) => v && (v.body.material.visible = false)); if (k === 'hud') document.getElementById('hud').style.display = 'none'; }; window.__fixDpr = (d) => { DPR = d; QL = 1; R.setPixelRatio(d); resize(); window.__noAdapt = true; }; window.__GL = { R, scene, cam, floor, glow, foodPts, spPts, VIS, THREE }; window.__LS = () => LS; window.__pred = () => PRED; window.__dbg = () => ({ ft: FT0, cx: corrX, cz: corrZ, at: AUTH && AUTH.t0, ax: AUTH && AUTH.x, acc, alpha: ALPHA }); window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };
+window.__hide = (k) => { const o = { floor, wall, glow, food: foodPts, sparks: spPts }[k]; if (o) o.visible = false; if (k === 'snakes') VIS.forEach((v) => v && (v.body.material.visible = false)); if (k === 'hud') document.getElementById('hud').style.display = 'none'; }; window.__fixDpr = (d) => { DPR = d; QL = 1; R.setPixelRatio(d); resize(); window.__noAdapt = true; }; window.__GL = { R, scene, cam, floor, glow, foodPts, spPts, VIS, THREE }; window.__coil = () => COIL; window.__resync = () => { if (LS) applySnap(G.snap(LS, true)); }; window.__vis = () => VIS; window.__ringR = (i) => { const s = M.sn[i], q = s && s.sq; if (!q) return null; let r = 0, n = 0; const pull = q.tm === curTick && q.f < 1 ? 1 + (1/q.f - 1)*(1 - ALPHA) : 1; for (let k = 0; k <= q.k && k < s.tr.length; k++) { r += Math.hypot(s.tr[k][0] - q.cx, s.tr[k][1] - q.cz)*pull; n++; } return r/n; }; window.__LS = () => LS; window.__pred = () => PRED; window.__dbg = () => ({ ft: FT0, cx: corrX, cz: corrZ, at: AUTH && AUTH.t0, ax: AUTH && AUTH.x, acc, alpha: ALPHA }); window.__dpr = () => DPR; window.__prof = () => PROF; window.__M = () => M; window.__net = () => NET; window.__mode = () => MODE; window.__solo = () => $('goSolo').onclick(); window.__aim = (a, b) => { aim = a; boost = b; };

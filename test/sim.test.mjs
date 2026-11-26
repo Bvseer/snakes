@@ -47,17 +47,22 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
   for (let k = 30; k >= 0; k--) G.addHead(o, 0.25, -1.6 - k*G.SEG); o.a = Math.PI/2; o.ta = o.a; o.L = 60;
   for (let i = 0; i < 8 && me.alive && o.alive; i++) { me.ta = 0; G.step(S); } console.log('rammed in the side of the head: me', me.alive ? 'alive' : 'dead', '| rammer', o.alive ? 'alive' : 'dead'); if (!me.alive || o.alive) { console.log('FAIL side-of-head rule'); process.exitCode = 1; } }
 // the squeeze: I circle around a snake; the ring tightens until it has no room, and a phone following along stays in step
-{ let died = 0, drift = 0, ticks = [];
+{ let died = 0, drift = 0, ticks = [], steady = [], gentle = true;
   const q = (v) => Math.round(v*100)/100;
   for (let seed = 1; seed <= 8; seed++) { const S = G.newGame(seed, { round: true }); S.tm = 0; const me = G.addSnake(S, 'me', 'Me', false); G.fillBots(S); const v = S.sn[1];
     for (const s of S.sn.slice(2)) s.alive = false;
     const R = 7, L = Math.ceil(2*Math.PI*R/G.SEG) + 8; me.L = L; me.tr = []; for (let k = L; k >= 0; k--) { const a = k/(L - 8)*Math.PI*2; G.addHead(me, q(Math.cos(a)*R), q(Math.sin(a)*R)); }
     me.a = -Math.PI/2; v.tr = []; v.L = 14; for (let k = 12; k >= 0; k--) G.addHead(v, q(0.3*(seed % 3) - 1), q(-k*0.3)); v.a = Math.PI/2; v.ta = v.a;
     const M = G.mirror(); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, true))));
-    let t = 0; while (v.alive && me.alive && t++ < 600) {
+    let t = 0, on = 0, first = 0, fs = []; while (v.alive && me.alive && t++ < 600) {
       // the player keeps going round, leaning slightly inwards (what you do holding the turn a little)
       const ang = Math.atan2(me.z, me.x); me.ta = ang - Math.PI/2 - 0.12; me.turn = 0;
       G.step(S); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, false))));
-      const a = S.sn[0].tr, b = M.sn[0].tr; if (a.length !== b.length || a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1])) drift++; }
+      const a = S.sn[0].tr, b = M.sn[0].tr; if (a.length !== b.length || a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1])) drift++;
+      const e = S.ev.find((x) => x.t === 'sq' && x.i === 0); if (e) { on++; if (!first) first = t; fs.push(e.f); } }
+    // once it starts it pulls on every tick (no stutter), and it starts gently
+    if (first) { steady.push(on/(t - first + 1)); if (fs.length > 6 && !(fs[0] > fs[6])) gentle = false; }
     if (!v.alive) { died++; ticks.push((t/20).toFixed(1) + 's'); } }
-  console.log('squeeze: trapped snake died', died + '/8', 'after', ticks.join(','), '| phone out of step on', drift, 'ticks'); if (died < 7 || drift) { console.log('FAIL squeeze'); process.exitCode = 1; } }
+  const worst = Math.min(...steady);
+  console.log('squeeze: trapped snake died', died + '/8', 'after', ticks.join(','), '| pulling on', Math.round(worst*100) + '% of ticks at worst | gentle start', gentle, '| phone out of step on', drift, 'ticks');
+  if (died < 7 || drift || worst < 0.9 || !gentle) { console.log('FAIL squeeze'); process.exitCode = 1; } }

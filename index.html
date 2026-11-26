@@ -40,6 +40,7 @@
   @keyframes fade { 0%, 80% { opacity: 1 } 100% { opacity: 0 } }
   #big { z-index: 2; position: fixed; left: 0; right: 0; top: 34%; text-align: center; font-size: 46px; pointer-events: none; opacity: 0; transition: opacity .25s, transform .25s; transform: scale(.9); }
   #big.on { opacity: 1; transform: scale(1); } #big small { display: block; font: 700 16px Manrope, system-ui, sans-serif; margin-top: 6px; text-shadow: none; color: var(--ink); }
+  #danger { position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: 0; transition: opacity .25s; box-shadow: inset 0 0 90px 26px rgba(255,40,95,.6); }
   #toast { position: fixed; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 8px 14px; border-radius: 12px; background: rgba(8,12,28,.8); border: 1px solid rgba(0,240,255,.3); opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
   #toast.on { opacity: 1; }
 
@@ -86,6 +87,7 @@
 </div>
 <div id="big" class="t neon"></div>
 <div id="toast"></div>
+<div id="danger"></div>
 
 <div class="scr" id="home">
   <h1 class="t"><span class="neon">НЕОН</span><span class="neonm">ЗМЕЙКИ</span></h1>
@@ -104,7 +106,7 @@
     <p><b>Погибшая змейка</b> рассыпается в крупные огоньки — хватай их первым.</p>
     <p><b>🌍 Онлайн</b> — общая арена со случайными игроками (до 10 человек, остальные — боты). <b>🤖 С ботами</b> — одному, работает и без интернета. <b>👥 С друзьями</b> — своя арена по ссылке.</p>
     <p><b>Арена не кончается.</b> Погибшие змейки сменяются новыми, друзья заходят в любой момент. Разбился — жми «Ещё раз» и возвращайся. Только что появившаяся змейка мигает: полторы секунды её нельзя сбить.</p>
-    <p><b>Окружи</b> змейку своим телом: когда кольцо замкнётся, оно само начнёт медленно сжиматься, пока ей не станет некуда деться.</p>
+    <p><b>Окружи</b> змейку своим телом: как только обовьёшь её голову полным кругом, кольцо начнёт плавно стягиваться, пока ей не станет некуда деться. Попал в кольцо сам — вырывайся рывком, пока оно не замкнулось.</p>
   </div>
   <button class="b" id="helpBack">Понятно</button>
 </div>
@@ -128,6 +130,6 @@
 
 <div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js?v=1.25"></script>
+<script type="module" src="./game.js?v=1.26"></script>
 </body>
 </html>

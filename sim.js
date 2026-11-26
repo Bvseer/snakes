@@ -152,23 +152,30 @@ function think2(S, s, g) {
 }
 
 // ---- the squeeze ------------------------------------------------------------
-// When a snake's head comes back to its own body, the stretch in between is a closed ring. If someone else's
-// head is inside it, the ring tightens slowly towards its middle, like a constrictor, until there is no room left.
-export const SQUEEZE = 1.1;   // units per second the ring closes in
-function inside(px, pz, t, k) { let c = false; for (let i = 0, j = k; i <= k; j = i++) { const a = t[i], b = t[j]; if ((a[1] > pz) !== (b[1] > pz) && px < (b[0] - a[0])*(pz - a[1])/(b[1] - a[1]) + a[0]) c = !c; } return c; }
+// A snake whose body goes all the way round someone else's head has that snake in a coil. For as long as the coil
+// holds, it draws in towards its middle like a constrictor: gently at first, then steadily, until there is no room
+// left inside. It is judged by how far round the body winds, not by the head touching the body, so the pull does
+// not stutter while the snake keeps circling.
+export const SQUEEZE = 1.0, COILMIN = 2.2;   // units per second the coil closes in; the tightest it gets
 export function squeeze(s, k, cx, cz, f) { const t = s.tr; for (let i = 0; i <= k && i < t.length; i++) t[i] = [q(cx + (t[i][0] - cx)*f), q(cz + (t[i][1] - cz)*f)]; }
 function coil(S, s) {
-  const t = s.tr, r = radius(s.L), close = (2*r)*(2*r)*1.6;
-  // every place the head touches its own body closes a ring; take the first one with someone inside
-  const others = S.sn.filter((o) => o !== s && o.alive && Math.abs(o.x - s.x) < 40 && Math.abs(o.z - s.z) < 40); if (!others.length) return;
-  let k = -1;
-  for (let i = 12; i < t.length; i++) { const dx = t[i][0] - s.x, dz = t[i][1] - s.z; if (dx*dx + dz*dz >= close) continue;
-    if (others.some((o) => inside(o.x, o.z, t, i))) { k = i; break; } i += 6; }
-  if (k < 0) return;
+  const t = s.tr, r = radius(s.L), reach = s.L*SEG/Math.PI + 1, gapMax = 3 + 3*r;
+  let k = -1, who = null;
+  if (t.length >= 24) for (const o of S.sn) { if (o === s || !o.alive || o.safe > S.tm) continue; const hx = o.x - s.x, hz = o.z - s.z; if (hx*hx + hz*hz > reach*reach) continue;
+    // walk back along my body, adding up the angle it sweeps around their head: a full turn is a coil
+    let w = 0, pa = Math.atan2(t[0][1] - o.z, t[0][0] - o.x), at = -1;
+    for (let i = 1; i < t.length; i++) { const a = Math.atan2(t[i][1] - o.z, t[i][0] - o.x); w += wrap(a - pa); pa = a; if (w >= 2*Math.PI || w <= -2*Math.PI) { at = i; break; } }
+    if (at < 0 || Math.hypot(t[at][0] - t[0][0], t[at][1] - t[0][1]) > gapMax) continue;   // not all the way round, or the way out is still wide open
+    if (k < 0 || at < k) { k = at; who = o; } }
+  if (k < 0) { s.coilT = Math.max(0, (s.coilT || 0) - 2*TICK); if (!s.coilT) s.coilC = null; return; }
   let cx = 0, cz = 0; for (let i = 0; i <= k; i++) { cx += t[i][0]; cz += t[i][1]; } cx /= k + 1; cz /= k + 1;
-  let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1; if (rad < 1.2) return;
-  const f = Math.max(0.9, 1 - SQUEEZE*TICK/rad); cx = q(cx); cz = q(cz);
-  squeeze(s, k, cx, cz, f); S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f });
+  // the middle it pulls towards moves smoothly, or the whole coil would shiver
+  if (s.coilC) { cx = s.coilC[0] + (cx - s.coilC[0])*0.25; cz = s.coilC[1] + (cz - s.coilC[1])*0.25; } s.coilC = [cx, cz];
+  let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1;
+  s.coilT = Math.min(1, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/0.7), ease = e*e*(3 - 2*e);
+  const f = rad <= COILMIN ? 1 : Math.max(0.9, 1 - SQUEEZE*ease*TICK/rad); cx = q(cx); cz = q(cz);
+  if (f < 1) squeeze(s, k, cx, cz, f);
+  S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f, v: who.i, r: q(rad) });
 }
 
 // every body point, by cell, for collisions and for bots looking where they go
@@ -296,7 +303,8 @@ export function apply(M, o) {
     if (o.full) { s.x = x; s.z = z; s.px = x; s.pz = z; } else if (s.alive) addHead(s, x, z);
     s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.safe = !!(h[5] & 4); s.alive = !!(h[5] & 1); }
   if (o.ev && !o.full) for (const e of o.ev) {
-    if (e.t === 'sq' && M.sn[e.i]) squeeze(M.sn[e.i], e.k, e.cx, e.cz, e.f);
+    // the coil tightened this tick: the same pull here, and what the picture needs to show it (who, how tight, when)
+    if (e.t === 'sq' && M.sn[e.i]) { const c = M.sn[e.i]; if (e.f < 1) squeeze(c, e.k, e.cx, e.cz, e.f); c.sq = { k: e.k, cx: e.cx, cz: e.cz, f: e.f, v: e.v, r: e.r, tm: o.tm }; }
   }
   if (o.fr || o.fa || o.full) M.fv = (M.fv || 0) + 1;
   if (o.fr) for (const id of o.fr) M.food.delete(id);
