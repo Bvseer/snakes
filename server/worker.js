@@ -12,6 +12,7 @@ const FRESH = 7*24*3600, MAXP = G.MAXS - 2, TICK = 50;
 const botName = (env) => env.BOT_NAME || 'NeonSnakesGameBot';
 const link = (env, id) => 'https://t.me/' + botName(env) + '?startapp=r_' + id;
 const roomOk = (id) => typeof id === 'string' && /^[a-z0-9]{6,12}$/.test(id);
+const isPublic = (id) => /^pub[a-z0-9]{7}$/.test(id);
 const newId = () => { const abc = 'abcdefghjkmnpqrstuvwxyz23456789', r = crypto.getRandomValues(new Uint8Array(8)); let s = ''; for (let i = 0; i < 8; i++) s += abc[r[i] % abc.length]; return s; };
 const cleanName = (u) => String(u.first_name || u.username || 'Игрок').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16) || 'Игрок';
 
@@ -47,9 +48,10 @@ export class Room {
     // the same person from a second window: the older one goes
     for (const [ws, v] of this.socks) if (v.id === id) { this.send(ws, { t: 'bye', why: 'again' }); try { ws.close(4000, 'again'); } catch (e) {} this.socks.delete(ws); }
     this.socks.set(server, { id, name, seen: Date.now() }); this.sweepOn();
+    this.room = request.headers.get('X-Room') || this.room;
     if (!this.S) { this.S = G.newGame(Date.now() & 0x7fffffff); G.fillBots(this.S); this.k = 0; this.acc = 0; this.last = Date.now(); this.run(); }
     G.spawnHuman(this.S, id, name);
-    this.send(server, { t: 'hello', me: id }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby());
+    this.send(server, { t: 'hello', me: id, pub: isPublic(this.room || '') }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby()); this.report();
     server.addEventListener('message', (e) => this.onMessage(server, e.data));
     const gone = () => this.leave(server); server.addEventListener('close', gone); server.addEventListener('error', gone);
     return new Response(null, { status: 101, webSocket: client });
@@ -60,7 +62,10 @@ export class Room {
     else if ((m.t === 'spawn' || m.t === 'start') && this.S) G.spawnHuman(this.S, me.id, me.name);   // back in after a crash
     else if (m.t === 'ping') this.send(ws, { t: 'pong', k: +m.k || 0 });
   }
-  leave(ws) { const me = this.socks.get(ws); if (!me) return; this.socks.delete(ws);
+  // a public arena keeps the matchmaker up to date with how many people are in it
+  report() { if (!this.room || !isPublic(this.room) || !this.env.LOBBY) return; const n = this.people().length;
+    try { this.state.waitUntil(this.env.LOBBY.get(this.env.LOBBY.idFromName('public')).fetch('https://lobby/report', { method: 'POST', body: JSON.stringify({ room: this.room, n }) }).catch(() => {})); } catch (e) {} }
+  leave(ws) { const me = this.socks.get(ws); if (!me) return; this.socks.delete(ws); this.report();
     if (this.S && !this.people().some((p) => p.id === me.id)) G.removeHuman(this.S, me.id);
     if (!this.socks.size) { this.stop(); this.S = null; if (this.sweeper) { clearInterval(this.sweeper); this.sweeper = null; } return; }
     this.all(this.lobby()); }
@@ -72,7 +77,26 @@ export class Room {
     const S = this.S; if (!S) return this.stop();
     // real time, whatever the timer does: catch up by whole ticks, every one of them sent, since phones rebuild bodies from them
     const t = Date.now(); this.acc += Math.min(500, t - this.last); this.last = t;
-    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); }
+    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); if (this.k % 600 === 0) this.report(); }
+  }
+}
+
+// ---- the matchmaker ---------------------------------------------------------
+// One for the whole game. It knows the public arenas and how many people each holds, and sends a newcomer
+// to the fullest one that still has room, so people meet people; when all are full it opens a new one.
+export class Lobby {
+  constructor(state, env) { this.rooms = new Map(); }   // room -> { n, t }
+  async fetch(request) {
+    const url = new URL(request.url), now = Date.now(); let b = {}; try { b = await request.json(); } catch (e) {}
+    for (const [id, r] of this.rooms) if (now - r.t > 90000 || (r.n <= 0 && now - r.t > 15000)) this.rooms.delete(id);
+    if (url.pathname === '/report') { if (isPublic(String(b.room || ''))) this.rooms.set(b.room, { n: Math.max(0, b.n | 0), t: now }); return json({ ok: true }); }
+    if (url.pathname === '/pick') {
+      let best = null; for (const [id, r] of this.rooms) if (r.n < MAXP && r.n > 0 && (!best || r.n > best.r.n)) best = { id, r };
+      if (!best) { const id = 'pub' + newId().slice(0, 7); this.rooms.set(id, { n: 1, t: now }); return json({ ok: true, room: id, fresh: true }); }
+      best.r.n++; best.r.t = now; return json({ ok: true, room: best.id });   // count them in now, so a crowd arriving together spreads out right
+    }
+    if (url.pathname === '/stats') return json({ ok: true, arenas: [...this.rooms].map(([id, r]) => ({ id, people: r.n })) });
+    return json({ ok: false }, 404);
   }
 }
 
@@ -105,16 +129,20 @@ export default {
       if (path === '/ws') {
         const room = url.searchParams.get('room'), me = await whoIs(url.searchParams.get('init'), env);
         if (!roomOk(room)) return json({ ok: false, err: 'room' }, 400); if (!me) return json({ ok: false, err: 'auth' }, 401);
-        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name));
+        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name)); h.set('X-Room', room);
         return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(new Request(request.url, { headers: h }));
       }
+      if (path === '/play' && request.method === 'POST') { let q = {}; try { q = await request.json(); } catch (e) {} const me = await whoIs(q && q.init, env); if (!me) return json({ ok: false, err: 'auth' }, 401);
+        if (!env.LOBBY) return json({ ok: false, err: 'lobby' }, 503);
+        return env.LOBBY.get(env.LOBBY.idFromName('public')).fetch('https://lobby/pick', { method: 'POST', body: '{}' }); }
+      if (path === '/arenas') return env.LOBBY ? env.LOBBY.get(env.LOBBY.idFromName('public')).fetch('https://lobby/stats', { method: 'POST', body: '{}' }) : json({ ok: false });
       if (path === '/new' && request.method === 'POST') { let q = {}; try { q = await request.json(); } catch (e) {} const me = await whoIs(q && q.init, env); if (!me) return json({ ok: false, err: 'auth' }, 401); const id = newId(); return json({ ok: true, id, link: link(env, id) }); }
       if (path === '/share' && request.method === 'POST') { let q = {}; try { q = await request.json(); } catch (e) {} const me = await whoIs(q && q.init, env), room = String((q && q.room) || ''); if (!me) return json({ ok: false, err: 'auth' }, 401); if (!roomOk(room)) return json({ ok: false, err: 'room' }, 400);
         const r = await tg(env, 'savePreparedInlineMessage', { user_id: Number(me.id), allow_user_chats: true, allow_group_chats: true, result: { type: 'article', id: 'r' + room, title: 'Неон Змейки', description: me.uz ? 'Arenaga taklif' : 'Приглашение на арену', input_message_content: { message_text: me.uz ? '🐍 ' + me.name + ' neon ilonlar jangiga chaqiryapti! 👇' : '🐍 ' + me.name + ' зовёт на арену Неон Змеек! Заходи 👇' }, reply_markup: { inline_keyboard: [[{ text: me.uz ? '🎮 Arenaga kirish' : '🎮 На арену', url: link(env, room) }]] } } });
         return r && r.ok ? json({ ok: true, id: r.result.id }) : json({ ok: false, err: (r && r.description) || 'tg' }, 502); }
       if (path === '/tg' && request.method === 'POST') return await telegram(env, request);
       if (path === '/setup') { if (!env.HOOK_SECRET || url.searchParams.get('key') !== env.HOOK_SECRET) return json({ ok: false, err: 'key' }, 403); return json(Object.assign({ ok: true }, await setup(env, url.origin))); }
-      if (path === '/' || path === '/health') return json({ ok: true, name: 'Neon Snakes', rooms: !!env.ROOMS, token: !!env.BOT_TOKEN, key: !!env.HOOK_SECRET });
+      if (path === '/' || path === '/health') return json({ ok: true, name: 'Neon Snakes', rooms: !!env.ROOMS, lobby: !!env.LOBBY, token: !!env.BOT_TOKEN, key: !!env.HOOK_SECRET });
       return json({ ok: false, err: 'path' }, 404);
     } catch (e) { return json({ ok: false, err: 'server', msg: String(e && e.message || e).slice(0, 200) }, 500); }
   },

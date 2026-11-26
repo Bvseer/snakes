@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.24';
+import * as G from './sim.js?v=1.25';
 
-export const VERSION = '1.24';
+export const VERSION = '1.25';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -171,7 +171,7 @@ function showDeath() {
   const top = M.sn.filter((o) => o.alive).sort((a, b) => b.L - a.L).slice(0, 5);
   $('res').innerHTML = '<div class="me"><span class="n">📏 ' + DEATH.L + ' · 💥 ' + DEATH.kills + ' · ⏱ ' + m + ':' + String(sec).padStart(2, '0') + '</span><span class="s">' + DEATH.rank + ' место из ' + DEATH.of + '</span></div>'
     + '<p class="lb">Сейчас на арене лучшие:</p>' + top.map((r, k) => '<div><span class="p">' + (k + 1) + '</span><i style="color:' + hex(G.COLORS[r.col % G.COLORS.length]) + '"></i><span class="n">' + esc(r.name) + '</span><span class="s">📏 ' + Math.floor(r.L) + '</span></div>').join('');
-  $('oInvite').classList.toggle('hidden', MODE !== 'net');
+  $('oInvite').classList.toggle('hidden', MODE !== 'net' || !!(NET && NET.pub));
 }
 function applySnap(o) {
   const evs = G.apply(M, o); curTick = o.tm;
@@ -333,7 +333,7 @@ const mini = $('mini').getContext('2d');
 function hud(dt) {
   hudT -= dt; if (hudT > 0 || MODE === 'demo') return; hudT = 0.2;
 
-  const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + (MODE === 'net' && NET && NET.players ? ' · 👥 ' + NET.players.length : '');
+  const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + (MODE === 'net' && NET && NET.players ? (NET.pub ? ' · 🌍 ' : ' · 👥 ') + NET.players.length : '');
   const me = meS(); $('hLen').textContent = me ? (me.alive ? '📏 ' + Math.floor(me.L) : '👀 смотришь') : '';
   let rows = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L); const mi = rows.findIndex((s) => s.id === ME); rows = rows.slice(0, 8); if (mi >= 8) rows.push(M.sn.find((s) => s.id === ME && s.alive));
   const bh = rows.map((s) => '<div class="' + (s.id === ME ? 'me ' : '') + (s.alive ? '' : 'dead') + '">' + esc(nameOf(s)) + ' ' + Math.floor(s.L) + '<i style="color:' + hex(G.COLORS[s.col % G.COLORS.length]) + '"></i></div>').join(''); if (bh !== boardH) { boardH = bh; $('board').innerHTML = bh; }
@@ -410,7 +410,7 @@ function netJoin(room) {
   open(); N.ping = setInterval(() => { if (N.ws && N.ws.readyState === 1) N.ws.send(JSON.stringify({ t: 'ping', k: performance.now() })); }, 2000);
 }
 function netMsg(N, m) {
-  if (m.t === 'hello') { N.me = m.me; ME = m.me; }
+  if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; }
   else if (m.t === 'pong') { if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
   else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;
@@ -433,6 +433,13 @@ function netPlay(dt) {
   ALPHA = Math.max(0, Math.min(1, playTick - curTick));
 }
 function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); try { N.ws && N.ws.close(); } catch (e) {} }
+// online: the matchmaker sends you to a public arena with other people in it
+async function netOnline() {
+  if (!initStr()) { toast('Онлайн — внутри Telegram: @' + BOT + '. Пока — с ботами', 3000); $('goSolo').onclick(); return; }
+  try { const r = await (await fetch((zt().api || API) + '/play', { method: 'POST', body: JSON.stringify({ init: initStr() }) })).json();
+    if (r.ok && r.room) { netJoin(r.room); return; } } catch (e) {}
+  toast('Онлайн сейчас недоступен — играем с ботами', 3000); $('goSolo').onclick();
+}
 async function netNew() {
   if (!initStr()) { toast('С друзьями — в Telegram: @' + BOT, 3000); return; }
   try { const r = await (await fetch((zt().api || API) + '/new', { method: 'POST', body: JSON.stringify({ init: initStr() }) })).json(); if (r.ok) netJoin(r.id); else toast('Не получилось создать комнату', 2500); } catch (e) { toast('Нет связи с сервером', 2500); }
@@ -445,6 +452,7 @@ function goHome() { netLeave(); MODE = 'demo'; ME = null; $('hud').classList.rem
 
 $('goSolo').onclick = () => { MODE = 'solo'; aim = null; sentA = 99; sentR = 0; src = null; KH = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
 $('goNet').onclick = netNew;
+$('goOnline').onclick = netOnline;
 $('goHelp').onclick = () => show('help'); $('helpBack').onclick = () => show('home');
 $('lStart').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); };
 $('lInvite').onclick = netInvite; $('lLeave').onclick = goHome; $('toHome').onclick = goHome;
