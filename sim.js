@@ -109,6 +109,26 @@ function think2(S, s, g) {
   s.boost = canDash && ((A.boostWant && Math.abs(wrap(pick - want)) < 0.45) || pickT < H*0.6) && fly(pick, true) === Infinity;
 }
 
+// ---- the squeeze ------------------------------------------------------------
+// When a snake's head comes back to its own body, the stretch in between is a closed ring. If someone else's
+// head is inside it, the ring tightens slowly towards its middle, like a constrictor, until there is no room left.
+export const SQUEEZE = 1.1;   // units per second the ring closes in
+function inside(px, pz, t, k) { let c = false; for (let i = 0, j = k; i <= k; j = i++) { const a = t[i], b = t[j]; if ((a[1] > pz) !== (b[1] > pz) && px < (b[0] - a[0])*(pz - a[1])/(b[1] - a[1]) + a[0]) c = !c; } return c; }
+export function squeeze(s, k, cx, cz, f) { const t = s.tr; for (let i = 0; i <= k && i < t.length; i++) t[i] = [q(cx + (t[i][0] - cx)*f), q(cz + (t[i][1] - cz)*f)]; }
+function coil(S, s) {
+  const t = s.tr, r = radius(s.L), close = (2*r)*(2*r)*1.6;
+  // every place the head touches its own body closes a ring; take the first one with someone inside
+  const others = S.sn.filter((o) => o !== s && o.alive && Math.abs(o.x - s.x) < 40 && Math.abs(o.z - s.z) < 40); if (!others.length) return;
+  let k = -1;
+  for (let i = 12; i < t.length; i++) { const dx = t[i][0] - s.x, dz = t[i][1] - s.z; if (dx*dx + dz*dz >= close) continue;
+    if (others.some((o) => inside(o.x, o.z, t, i))) { k = i; break; } i += 6; }
+  if (k < 0) return;
+  let cx = 0, cz = 0; for (let i = 0; i <= k; i++) { cx += t[i][0]; cz += t[i][1]; } cx /= k + 1; cz /= k + 1;
+  let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1; if (rad < 1.2) return;
+  const f = Math.max(0.9, 1 - SQUEEZE*TICK/rad); cx = q(cx); cz = q(cz);
+  squeeze(s, k, cx, cz, f); S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f });
+}
+
 // every body point, by cell, for collisions and for bots looking where they go
 const CELL = 3, HIT = { k: 0 };
 function grid(S) {
@@ -164,6 +184,7 @@ export function step(S) {
     if (boost) { s.L = q(s.L - 1.6*TICK); s.dropT += TICK; if (s.dropT > 0.35) { s.dropT = 0; const p = s.tr[s.tr.length - 1]; food(S, p[0], p[1], 0.5); } }
     s.boosting = boost;
   }
+  for (const s of S.sn) if (s.alive) coil(S, s);
   // who hit whom this tick. Ramming someone's side right behind their head brings your head next to theirs too:
   // then only the one who did the ramming dies. Two snakes meeting head to head: the shorter one goes (both if equal).
   g = grid(S); const hits = new Map();
@@ -225,6 +246,7 @@ export function apply(M, o) {
     // the server grew the body with last tick's length, so must we
     if (o.full) { s.x = x; s.z = z; s.px = x; s.pz = z; } else if (s.alive) addHead(s, x, z);
     s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.alive = !!(h[5] & 1); }
+  if (o.ev && !o.full) for (const e of o.ev) if (e.t === 'sq' && M.sn[e.i]) squeeze(M.sn[e.i], e.k, e.cx, e.cz, e.f);
   if (o.fr || o.fa || o.full) M.fv = (M.fv || 0) + 1;
   if (o.fr) for (const id of o.fr) M.food.delete(id);
   if (o.fa) for (const f of o.fa) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]);
