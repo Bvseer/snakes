@@ -1,6 +1,6 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.37';
+import * as G from './sim.js?v=1.38';
 
 const VERSION = G.VERSION;
 // the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
@@ -320,7 +320,10 @@ const camT = new THREE.Vector3(0, 0, 0), camP = new THREE.Vector3(0, 60, 40); le
 // they were a moment ago. That gap (a couple of body widths at speed) is what made near misses count as crashes.
 // So the others are carried forward by the same amount along the way they are going: their bodies follow the true
 // path, only the last stretch in front of the head is an estimate, eased so it does not twitch.
-function leadTime() { return MODE === 'solo' ? G.TICK : 0; }   // online the others are drawn exactly as the game sent them: carrying them forward made their heads twitch
+// Online the others are drawn exactly as the game sent them (carrying them forward all the time made their heads
+// twitch) — except while the line has stalled and nothing new has come: then they are carried on along their last
+// course for up to a quarter of a second, instead of standing still.
+function leadTime() { return MODE === 'solo' ? G.TICK : MODE === 'net' ? CLK.over*G.TICK : 0; }
 function ahead(v, s, bx, bz, dt, lead) {
   const E = v.ex || (v.ex = { own: false, id: null, om: 0, sp: G.V, path: [], bx: 0, bz: 0, ba: 0, x: 0, z: 0, a: 0 });
   const pa = Number.isFinite(s.pa) ? s.pa : s.a, om = Math.max(-G.TURN, Math.min(G.TURN, wrapA(s.a - pa)/G.TICK)), sp = s.boosting ? G.VB : G.V;
@@ -496,7 +499,7 @@ function netJoin(room) {
 }
 function netMsg(N, m) {
   if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; N.fresh = true; if (m.sv && m.sv !== VERSION && !N.told) { N.told = true; setTimeout(() => toast('Вышла версия ' + m.sv + ' — закрой и открой игру, когда будет удобно', 6000), 3000); } if (N.joined) toast(m.kept === 1 ? 'Связь вернулась — змейка твоя' : m.kept === 2 ? 'Арена перезапустилась — длина сохранена' : 'Связь вернулась', 2500); N.joined = true; }
-  else if (m.t === 'pong') { if (m.tok) N.tok = m.tok; if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
+  else if (m.t === 'pong') { if (m.tok) N.tok = m.tok; if (m.at || m.colo) N.where = 'вход ' + (m.at || '?') + ' → сервер ' + (m.colo || '?'); if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
   else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;
     for (const p of m.players) if (before.length && !before.includes(p.id) && p.id !== N.me) feed('👋 ' + p.name + ' зашёл на арену'); }
@@ -567,7 +570,7 @@ function loop(t) {
       if (!CAP && base < 13) CAP = 12.5;
       else if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
     if (!shaderBad && R.info.programs && R.info.programs.some((p) => p.diagnostics && p.diagnostics.runnable === false)) { shaderBad = true; $('ver').textContent = 'v' + VERSION + ' · графика: ошибка шейдера, напиши об этом'; }
-    if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '') + (MODE === 'net' ? ' · пинг ' + Math.round(RTT*1000) + ' · буфер ' + Math.round(CLK.depth*50) + ' мс · неровность ' + Math.round(CLK.jit*50) + ' мс · замираний ' + CLK.dry : ''); CLK.dry = 0;
+    if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '') + (MODE === 'net' ? ' · пинг ' + Math.round(RTT*1000) + ' · буфер ' + Math.round(CLK.depth*50) + ' мс · неровность ' + Math.round(CLK.jit*50) + ' мс · замираний ' + CLK.dry + (NET && NET.where ? ' · ' + NET.where : '') : ''); CLK.dry = 0;
     window.__fps = frames/fpsT; window.__late = late; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; FT.length = 0; }
 }
 

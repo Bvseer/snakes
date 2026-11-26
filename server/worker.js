@@ -48,7 +48,7 @@ export class Room {
     if (!here.includes(id) && here.length >= MAXP) { this.send(server, { t: 'full' }); try { server.close(4002, 'full'); } catch (e) {} return new Response(null, { status: 101, webSocket: client }); }
     // the same person from a second window: the older one goes
     for (const [ws, v] of this.socks) if (v.id === id) { this.send(ws, { t: 'bye', why: 'again' }); try { ws.close(4000, 'again'); } catch (e) {} this.socks.delete(ws); }
-    this.socks.set(server, { id, name, seen: Date.now(), cover: 4, lag: false }); this.sweepOn();
+    this.socks.set(server, { id, name, seen: Date.now(), cover: 4, lag: false, at: (request.headers.get('X-Colo') || '').slice(0, 4) }); this.sweepOn(); this.locate();
     this.room = request.headers.get('X-Room') || this.room;
     if (!this.S) { this.S = G.newGame(Date.now() & 0x7fffffff); G.fillBots(this.S); this.k = 0; this.acc = 0; this.last = Date.now(); this.run(); }
     // back after a dropped connection: the same snake, handed back from the autopilot. Back into a world that was
@@ -69,12 +69,14 @@ export class Room {
     else if (m.t === 'bye') me.bye = true;   // leaving on purpose: no waiting for them to come back
   }
   // a public arena keeps the matchmaker up to date with how many people are in it
+  // which Cloudflare city this arena is running in (asked once; shown in the hidden stats line on the phone)
+  locate() { if (this.colo || this.asking) return; this.asking = true; fetch('https://www.cloudflare.com/cdn-cgi/trace').then((r) => r.text()).then((t) => { const m = /colo=([A-Z]{3})/.exec(t); this.colo = m ? m[1] : '?'; }).catch(() => { this.colo = '?'; }); }
   report() { if (!this.room || !isPublic(this.room) || !this.env.LOBBY) return; const n = this.people().length;
     try { this.state.waitUntil(this.env.LOBBY.get(this.env.LOBBY.idFromName('public')).fetch('https://lobby/report', { method: 'POST', body: JSON.stringify({ room: this.room, n }) }).catch(() => {})); } catch (e) {} }
   // every couple of seconds each phone gets a signed receipt of what its snake has; it shows it if it has to come back
   async pong(ws, me, k) { let tok; const s = this.S && this.S.sn.find((v) => v.alive && v.id === me.id);
     if (s && this.env.BOT_TOKEN) { const body = [me.id, Math.floor(s.L), s.kills | 0, Math.floor(Date.now()/1000)].join('.'); tok = body + '.' + hex(await hmac(this.env.BOT_TOKEN + ':receipt', body)); }
-    this.send(ws, { t: 'pong', k, tok }); }
+    this.send(ws, { t: 'pong', k, tok, colo: this.colo || undefined, at: me.at || undefined }); }
   async receipt(id, tok) { if (!tok || typeof tok !== 'string' || tok.length > 200 || !this.env.BOT_TOKEN) return null; const p = tok.split('.'); if (p.length !== 5 || p[0] !== id) return null;
     const ts = +p[3]; if (!(Date.now()/1000 - ts < 120) || (this.dead.get(id) || 0) >= ts*1000) return null;   // too old, or that snake has crashed since
     if (!same(hex(await hmac(this.env.BOT_TOKEN + ':receipt', p.slice(0, 4).join('.'))), p[4])) return null; return { L: +p[1], kills: +p[2] }; }
@@ -152,7 +154,7 @@ export default {
       if (path === '/ws') {
         const room = url.searchParams.get('room'), me = await whoIs(url.searchParams.get('init'), env);
         if (!roomOk(room)) return json({ ok: false, err: 'room' }, 400); if (!me) return json({ ok: false, err: 'auth' }, 401);
-        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name)); h.set('X-Room', room); const res = url.searchParams.get('res'); if (res && res.length < 200) h.set('X-Resume', res); else h.delete('X-Resume');
+        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name)); h.set('X-Room', room); h.set('X-Colo', String((request.cf && request.cf.colo) || '')); const res = url.searchParams.get('res'); if (res && res.length < 200) h.set('X-Resume', res); else h.delete('X-Resume');
         return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(new Request(request.url, { headers: h }));
       }
       if (path === '/play' && request.method === 'POST') { let q = {}; try { q = await request.json(); } catch (e) {} const me = await whoIs(q && q.init, env); if (!me) return json({ ok: false, err: 'auth' }, 401);
