@@ -76,6 +76,11 @@ function addBot(S) { const k = botNo++, taken = new Set(S.sn.filter((o) => o.ali
   return addSnake(S, 'bot' + k + '_' + Math.floor(S.rnd()*1e6), pool[Math.floor(S.rnd()*pool.length)], true); }
 export function fillBots(S) { if (S.round) { let k = 0; const from = Math.floor(S.rnd()*8); while (S.sn.length < ROUNDS) { addSnake(S, 'bot' + k, BOTS[(from + k) % 8], true); k++; } return; }
   while (S.sn.filter((o) => o.alive).length < BOTMIN && addBot(S)); }
+// A person's connection dropped: their snake is not thrown away, a bot's brain keeps it out of trouble until they are back.
+export function autopilot(S, id, on) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (!s) return false;
+  s.auto = !!on; if (on && !s.ai) s.ai = { skill: 0.9, goal: null, think: 0, hunt: 0, v: 2 }; if (!on) { s.boost = false; s.turn = 0; s.ta = s.a; } return true; }
+// A person comes back into a world that no longer has their snake (the arena was restarted): the new one gets the length they had.
+export function restore(S, id, L, kills) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (!s) return; s.L = q(Math.max(L0, Math.min(600, +L || L0))); s.best = s.L; s.kills = Math.max(0, kills | 0); }
 // a person comes in, or comes back after crashing: into the arena at once
 export function spawnHuman(S, id, name) { const s = S.sn.find((v) => v.alive && v.id === String(id)); return s || addSnake(S, id, name, false); }
 // the endless arena keeps itself busy: whenever fewer snakes are alive than it wants, a bot is born (one a second at most)
@@ -238,7 +243,7 @@ function stepIn(S) {
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
   S.R = S.fixed ? S.R0 : q(arenaR(S.tm));   // fixed: the arena never closes in
   let g = grid(S);
-  for (const s of S.sn) if (s.alive && s.bot) (s.ai.v === 1 ? think : think2)(S, s, g);
+  for (const s of S.sn) if (s.alive && (s.bot || s.auto)) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
   for (const s of S.sn) { if (!s.alive) continue;
     const boost = s.boost && s.L > LMIN, turn = TURN*(boost ? 0.8 : 1)*TICK;

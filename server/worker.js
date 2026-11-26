@@ -34,7 +34,7 @@ async function tg(env, method, body) { try { return await (await fetch('https://
 export class Room {
   // An endless arena: it comes to life with the first person in and stops when the last one leaves.
   // People come in at any time and go straight onto the field; after a crash they come back when they like.
-  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; }
+  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; this.away = new Map(); this.dead = new Map(); }
   people() { return [...this.socks.values()].filter((v, i, a) => a.findIndex((w) => w.id === v.id) === i); }
   lobby() { return { t: 'lobby', ph: 'play', players: this.people().map((p) => ({ id: p.id, name: p.name })) }; }
   send(ws, o) { try { ws.send(typeof o === 'string' ? o : JSON.stringify(o)); } catch (e) {} }
@@ -42,6 +42,7 @@ export class Room {
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('ws only', { status: 426 });
     const id = request.headers.get('X-Uid'); let name = 'Игрок'; try { name = decodeURIComponent(request.headers.get('X-Name') || 'Игрок'); } catch (e) {}
+    const back = await this.receipt(id, request.headers.get('X-Resume'));   // checked before the socket opens, so no message is missed
     const pair = new WebSocketPair(), [client, server] = Object.values(pair); server.accept();
     const here = this.people().map((p) => p.id);
     if (!here.includes(id) && here.length >= MAXP) { this.send(server, { t: 'full' }); try { server.close(4002, 'full'); } catch (e) {} return new Response(null, { status: 101, webSocket: client }); }
@@ -50,8 +51,11 @@ export class Room {
     this.socks.set(server, { id, name, seen: Date.now() }); this.sweepOn();
     this.room = request.headers.get('X-Room') || this.room;
     if (!this.S) { this.S = G.newGame(Date.now() & 0x7fffffff); G.fillBots(this.S); this.k = 0; this.acc = 0; this.last = Date.now(); this.run(); }
-    G.spawnHuman(this.S, id, name);
-    this.send(server, { t: 'hello', me: id, pub: isPublic(this.room || '') }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby()); this.report();
+    // back after a dropped connection: the same snake, handed back from the autopilot. Back into a world that was
+    // restarted meanwhile: a new snake with the length the receipt vouches for.
+    const had = this.S.sn.some((s) => s.alive && s.id === id); this.away.delete(id);
+    G.spawnHuman(this.S, id, name); if (had) G.autopilot(this.S, id, false); else if (back) G.restore(this.S, id, back.L, back.kills);
+    this.send(server, { t: 'hello', me: id, kept: had ? 1 : back ? 2 : 0, pub: isPublic(this.room || '') }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby()); this.report();
     server.addEventListener('message', (e) => this.onMessage(server, e.data));
     const gone = () => this.leave(server); server.addEventListener('close', gone); server.addEventListener('error', gone);
     return new Response(null, { status: 101, webSocket: client });
@@ -60,15 +64,24 @@ export class Room {
     const me = this.socks.get(ws); if (!me || typeof data !== 'string' || data.length > 300) return; me.seen = Date.now(); let m; try { m = JSON.parse(data); } catch (e) { return; }
     if (m.t === 'in' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
     else if ((m.t === 'spawn' || m.t === 'start') && this.S) G.spawnHuman(this.S, me.id, me.name);   // back in after a crash
-    else if (m.t === 'ping') this.send(ws, { t: 'pong', k: +m.k || 0 });
+    else if (m.t === 'ping') this.pong(ws, me, +m.k || 0);
+    else if (m.t === 'bye') me.bye = true;   // leaving on purpose: no waiting for them to come back
   }
   // a public arena keeps the matchmaker up to date with how many people are in it
   report() { if (!this.room || !isPublic(this.room) || !this.env.LOBBY) return; const n = this.people().length;
     try { this.state.waitUntil(this.env.LOBBY.get(this.env.LOBBY.idFromName('public')).fetch('https://lobby/report', { method: 'POST', body: JSON.stringify({ room: this.room, n }) }).catch(() => {})); } catch (e) {} }
+  // every couple of seconds each phone gets a signed receipt of what its snake has; it shows it if it has to come back
+  async pong(ws, me, k) { let tok; const s = this.S && this.S.sn.find((v) => v.alive && v.id === me.id);
+    if (s && this.env.BOT_TOKEN) { const body = [me.id, Math.floor(s.L), s.kills | 0, Math.floor(Date.now()/1000)].join('.'); tok = body + '.' + hex(await hmac(this.env.BOT_TOKEN + ':receipt', body)); }
+    this.send(ws, { t: 'pong', k, tok }); }
+  async receipt(id, tok) { if (!tok || typeof tok !== 'string' || tok.length > 200 || !this.env.BOT_TOKEN) return null; const p = tok.split('.'); if (p.length !== 5 || p[0] !== id) return null;
+    const ts = +p[3]; if (!(Date.now()/1000 - ts < 120) || (this.dead.get(id) || 0) >= ts*1000) return null;   // too old, or that snake has crashed since
+    if (!same(hex(await hmac(this.env.BOT_TOKEN + ':receipt', p.slice(0, 4).join('.'))), p[4])) return null; return { L: +p[1], kills: +p[2] }; }
+  // a dropped connection is not a crash: the snake stays for a while on autopilot, and its owner gets it back
   leave(ws) { const me = this.socks.get(ws); if (!me) return; this.socks.delete(ws); this.report();
-    if (this.S && !this.people().some((p) => p.id === me.id)) G.removeHuman(this.S, me.id);
-    if (!this.socks.size) { this.stop(); this.S = null; if (this.sweeper) { clearInterval(this.sweeper); this.sweeper = null; } return; }
-    this.all(this.lobby()); }
+    if (this.S && !this.people().some((p) => p.id === me.id)) { if (me.bye) G.removeHuman(this.S, me.id); else if (G.autopilot(this.S, me.id, true)) this.away.set(me.id, Date.now()); }
+    if (this.socks.size) this.all(this.lobby()); else if (!this.away.size) this.shut(); }
+  shut() { this.stop(); this.S = null; this.away.clear(); if (this.sweeper) { clearInterval(this.sweeper); this.sweeper = null; } }
   // a phone that has gone quiet for 45 s is gone, even if its connection never said so (phones ping every 2 s)
   sweepOn() { if (this.sweeper) return; this.sweeper = setInterval(() => { const t = Date.now(); for (const [ws, v] of this.socks) if (t - v.seen > 45000) { try { ws.close(4001, 'quiet'); } catch (e) {} this.leave(ws); } }, 10000); }
   run() { if (this.timer) return; this.timer = setInterval(() => this.tick(), TICK); }
@@ -77,7 +90,10 @@ export class Room {
     const S = this.S; if (!S) return this.stop();
     // real time, whatever the timer does: catch up by whole ticks, every one of them sent, since phones rebuild bodies from them
     const t = Date.now(); this.acc += Math.min(500, t - this.last); this.last = t;
-    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); if (this.k % 600 === 0) this.report(); }
+    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); if (this.k % 600 === 0) this.report();
+      for (const e of S.ev) if (e.t === 'die' && S.sn[e.i] && !S.sn[e.i].bot) this.dead.set(S.sn[e.i].id, Date.now()); }
+    // people who dropped and did not come back within 12 s: their snake goes; an arena nobody is coming back to closes
+    if (this.k % 20 === 0 && this.away.size) { for (const [id, at] of this.away) if (t - at > 12000 || !S.sn.some((s) => s.alive && s.id === id)) { G.removeHuman(S, id); this.away.delete(id); } if (!this.socks.size && !this.away.size) this.shut(); }
   }
 }
 
@@ -129,7 +145,7 @@ export default {
       if (path === '/ws') {
         const room = url.searchParams.get('room'), me = await whoIs(url.searchParams.get('init'), env);
         if (!roomOk(room)) return json({ ok: false, err: 'room' }, 400); if (!me) return json({ ok: false, err: 'auth' }, 401);
-        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name)); h.set('X-Room', room);
+        const h = new Headers(request.headers); h.set('X-Uid', me.id); h.set('X-Name', encodeURIComponent(me.name)); h.set('X-Room', room); const res = url.searchParams.get('res'); if (res && res.length < 200) h.set('X-Resume', res); else h.delete('X-Resume');
         return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(new Request(request.url, { headers: h }));
       }
       if (path === '/play' && request.method === 'POST') { let q = {}; try { q = await request.json(); } catch (e) {} const me = await whoIs(q && q.init, env); if (!me) return json({ ok: false, err: 'auth' }, 401);

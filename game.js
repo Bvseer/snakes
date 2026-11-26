@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.28';
+import * as G from './sim.js?v=1.29';
 
-export const VERSION = '1.28';
+export const VERSION = '1.29';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -213,6 +213,7 @@ function onEvent(e) {
   if (e.t === 'spawn') { if (e.w[0] === ME && MODE !== 'demo') born(); return; }
   if (e.t === 'die') { const s = M.sn[e.i]; if (!s) return; const col = G.COLORS[s.col % G.COLORS.length]; burst(e.x, e.z, col, 70);
     const by = e.by >= 0 ? M.sn[e.by] : null; if (by) by.kills = (by.kills || 0) + 1;
+    if (s.id === ME && NET) NET.tok = null;
     if (s.id === ME && MODE !== 'demo') { DEATH = { L: Math.floor(s.L), kills: s.kills || 0, t: M.tm - (BORN || 0), by: by ? by.name : '', rank: 1 + M.sn.filter((o) => o.alive && o.L > s.L).length, of: M.sn.filter((o) => o.alive).length + 1 }; clearTimeout(deathT); deathT = setTimeout(showDeath, 1400); }
     if (MODE !== 'demo') { feed(by ? nameOf(by) + ' → ' + nameOf(s) : nameOf(s) + ' разбил' + (s.id === ME ? 'ся' : 'ся') + ' о стену', s.id === ME || (by && by.id === ME));
       const me = meS(); const dist = me ? Math.hypot(me.x - e.x, me.z - e.z) : 99;
@@ -470,15 +471,16 @@ function controls(dt) {
 function netJoin(room) {
   netLeave(); LS = null; MODE = 'net'; M = G.mirror(); overShown = false; Q.length = 0; lastTick = playTick = curTick = 0;
   const N = NET = { room, ws: null, me: null, players: [], tries: 0, link: 'https://t.me/' + BOT + '?startapp=r_' + room }; show(null); $('hud').classList.add('on'); toast('Подключаюсь к арене…', 1500);
-  const open = () => { if (NET !== N) return; const ws = N.ws = new WebSocket((zt().ws || API.replace('https:', 'wss:')) + '/ws?room=' + room + '&init=' + encodeURIComponent(initStr()));
+  // coming back after a dropped connection, the phone shows the game's last receipt for its snake
+  const open = () => { if (NET !== N) return; const ws = N.ws = new WebSocket((zt().ws || API.replace('https:', 'wss:')) + '/ws?room=' + room + '&init=' + encodeURIComponent(initStr()) + (N.joined && N.tok ? '&res=' + encodeURIComponent(N.tok) : ''));
     ws.onopen = () => { N.tries = 0; };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } netMsg(N, m); };
-    ws.onclose = (e) => { if (NET !== N) return; if (e.code === 4000) { toast('Ты зашёл в эту комнату с другого устройства', 3000); goHome(); return; } if (++N.tries > 4) { toast('Нет связи с комнатой', 3000); goHome(); return; } setTimeout(open, 800*N.tries); }; };
+    ws.onclose = (e) => { if (NET !== N) return; if (e.code === 4000) { toast('Ты зашёл в эту комнату с другого устройства', 3000); goHome(); return; } if (++N.tries > 10) { toast('Нет связи с ареной', 3000); goHome(); return; } if (N.tries === 1) toast('Связь прервалась — возвращаюсь…', 4000); setTimeout(open, N.tries === 1 ? 200 : Math.min(3000, 700*(N.tries - 1))); }; };
   open(); N.ping = setInterval(() => { if (N.ws && N.ws.readyState === 1) N.ws.send(JSON.stringify({ t: 'ping', k: performance.now() })); }, 2000);
 }
 function netMsg(N, m) {
-  if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; }
-  else if (m.t === 'pong') { if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
+  if (m.t === 'hello') { N.me = m.me; ME = m.me; N.pub = !!m.pub; N.fresh = true; if (N.joined) toast(m.kept === 1 ? 'Связь вернулась — змейка твоя' : m.kept === 2 ? 'Арена перезапустилась — длина сохранена' : 'Связь вернулась', 2500); N.joined = true; }
+  else if (m.t === 'pong') { if (m.tok) N.tok = m.tok; if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
   else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;
     for (const p of m.players) if (before.length && !before.includes(p.id) && p.id !== N.me) feed('👋 ' + p.name + ' зашёл на арену'); }
@@ -486,7 +488,7 @@ function netMsg(N, m) {
 }
 // phones get ticks unevenly over the air; play them back a couple of ticks late, at an even pace
 function netSnap(s) {
-  if (s.full && (!M.ready || s.tm < lastTick - 5)) { Q.length = 0; applySnap(s); playTick = lastTick = s.tm; ALPHA = 1; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; return; }
+  if (s.full && (!M.ready || s.tm < lastTick - 5 || (NET && NET.fresh))) { if (NET) NET.fresh = false; Q.length = 0; applySnap(s); playTick = lastTick = s.tm; ALPHA = 1; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; return; }
   if (!M.ready) return; Q.push(s); lastTick = s.tm;
   const i = M.sn.findIndex((v) => v.id === ME), h = i >= 0 && s.sn[i];
   if (h) setAuth(h[1]/100, h[2]/100, h[3]/100, h[4]/100, !!(h[5] & 1), performance.now() - RTT*500, s.tm/20);
@@ -499,7 +501,7 @@ function netPlay(dt) {
   while (Q.length && Q[0].tm <= playTick) applySnap(Q.shift());
   ALPHA = Math.max(0, Math.min(1, playTick - curTick));
 }
-function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); try { N.ws && N.ws.close(); } catch (e) {} }
+function netLeave() { if (!NET) return; const N = NET; NET = null; clearInterval(N.ping); try { if (N.ws && N.ws.readyState === 1) N.ws.send('{"t":"bye"}'); N.ws && N.ws.close(); } catch (e) {} }
 // online: the matchmaker sends you to a public arena with other people in it
 async function netOnline() {
   if (!initStr()) { toast('Онлайн — внутри Telegram: @' + BOT + '. Пока — с ботами', 3000); $('goSolo').onclick(); return; }
