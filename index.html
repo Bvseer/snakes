@@ -62,6 +62,8 @@
   #res div { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin: 4px 0; border-radius: 12px; background: rgba(8,12,28,.7); }
   #res div.me { border: 1px solid var(--c); box-shadow: 0 0 12px rgba(0,240,255,.3); }
   #res .p { width: 26px; font: 400 18px 'Russo One', system-ui, sans-serif; text-align: center; } #res .n { flex: 1; } #res .s { color: var(--mut); font-size: 13px; }
+  #oTitle small { display: block; font: 600 15px Manrope, system-ui, sans-serif; color: var(--mut); text-shadow: none; margin-top: 6px; }
+  #res .lb { margin: 14px 4px 4px; color: var(--mut); font-size: 13px; }
   #res i { width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
   #ver { position: fixed; right: 8px; bottom: calc(4px + env(safe-area-inset-bottom)); font-size: 11px; padding: 6px; color: var(--mut); opacity: .6; z-index: 4; pointer-events: none; }
   #hud.on ~ #ver { bottom: auto; top: calc(46px + env(safe-area-inset-top)); left: 50%; right: auto; transform: translateX(-50%); }
@@ -87,10 +89,9 @@
 
 <div class="scr" id="home">
   <h1 class="t"><span class="neon">НЕОН</span><span class="neonm">ЗМЕЙКИ</span></h1>
-  <div class="sub">Ешь огоньки, расти и заставляй других врезаться в твой хвост. Последний живой — победитель.</div>
-  <button class="b" id="goSolo">🐍 Играть с ботами</button>
+  <div class="sub">Огромная арена без перерывов: ешь огоньки, расти и заставляй других врезаться в твой хвост.</div>
+  <button class="b" id="goSolo">🐍 Играть</button>
   <button class="b m" id="goNet">👥 С друзьями</button>
-  <button class="b q" id="goArena">🎯 Арена: сжимается</button>
   <button class="b q" id="goHelp">Как играть</button>
 </div>
 
@@ -100,7 +101,7 @@
     <p><b>⚡ Рывок</b> — пока держишь второй палец на экране (на компьютере — W, ↑, пробел или Shift). Быстрее, но хвост тает.</p>
     <p><b>Погибаешь</b>, если врежешься головой в чужую змейку или в стену арены. Свой хвост не страшен.</p>
     <p><b>Погибшая змейка</b> рассыпается в крупные огоньки — хватай их первым.</p>
-    <p><b>Примерно через минуту арена начинает сжиматься</b> — если не выбрать в меню «Арена: не сжимается». Раунд идёт, пока не останется одна змейка — она и победила.</p>
+    <p><b>Арена не кончается.</b> Погибшие змейки сменяются новыми, друзья заходят в любой момент. Разбился — жми «Ещё раз» и возвращайся. Только что появившаяся змейка мигает: полторы секунды её нельзя сбить.</p>
     <p><b>Окружи</b> змейку своим телом: когда кольцо замкнётся, оно само начнёт медленно сжиматься, пока ей не станет некуда деться.</p>
   </div>
   <button class="b" id="helpBack">Понятно</button>
@@ -118,12 +119,13 @@
 <div class="scr hidden" id="over">
   <div id="oTitle" class="t neon" style="font-size:40px;text-align:center"></div>
   <div id="res"></div>
-  <button class="b" id="again">↻ Ещё раунд</button>
+  <button class="b" id="again">↻ Ещё раз</button>
+  <button class="b m hidden" id="oInvite">📨 Позвать друзей</button>
   <button class="b q" id="toHome">В меню</button>
 </div>
 
 <div id="ver"></div>
 <div id="load" class="t neon">Загрузка…</div>
-<script type="module" src="./game.js?v=1.22"></script>
+<script type="module" src="./game.js?v=1.23"></script>
 </body>
 </html>

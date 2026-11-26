@@ -8,7 +8,7 @@ const hex = (buf) => Array.from(new Uint8Array(buf)).map((b) => b.toString(16).p
 const enc = new TextEncoder();
 async function hmac(key, msg) { const k = await crypto.subtle.importKey('raw', typeof key === 'string' ? enc.encode(key) : key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']); return crypto.subtle.sign('HMAC', k, enc.encode(msg)); }
 function same(a, b) { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
-const FRESH = 7*24*3600, MAXP = G.MAXS, TICK = 50;
+const FRESH = 7*24*3600, MAXP = G.MAXS - 2, TICK = 50;
 const botName = (env) => env.BOT_NAME || 'NeonSnakesGameBot';
 const link = (env, id) => 'https://t.me/' + botName(env) + '?startapp=r_' + id;
 const roomOk = (id) => typeof id === 'string' && /^[a-z0-9]{6,12}$/.test(id);
@@ -31,9 +31,11 @@ async function tg(env, method, body) { try { return await (await fetch('https://
 
 // ---- one room -------------------------------------------------------------
 export class Room {
-  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.ph = 'lobby'; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; this.fixed = false; }
+  // An endless arena: it comes to life with the first person in and stops when the last one leaves.
+  // People come in at any time and go straight onto the field; after a crash they come back when they like.
+  constructor(state, env) { this.state = state; this.env = env; this.socks = new Map(); this.S = null; this.timer = null; this.k = 0; this.acc = 0; this.last = 0; }
   people() { return [...this.socks.values()].filter((v, i, a) => a.findIndex((w) => w.id === v.id) === i); }
-  lobby() { return { t: 'lobby', ph: this.ph, fixed: this.fixed, players: this.people().map((p) => ({ id: p.id, name: p.name })) }; }
+  lobby() { return { t: 'lobby', ph: 'play', players: this.people().map((p) => ({ id: p.id, name: p.name })) }; }
   send(ws, o) { try { ws.send(typeof o === 'string' ? o : JSON.stringify(o)); } catch (e) {} }
   all(o) { const s = typeof o === 'string' ? o : JSON.stringify(o); for (const ws of this.socks.keys()) this.send(ws, s); }
   async fetch(request) {
@@ -45,39 +47,32 @@ export class Room {
     // the same person from a second window: the older one goes
     for (const [ws, v] of this.socks) if (v.id === id) { this.send(ws, { t: 'bye', why: 'again' }); try { ws.close(4000, 'again'); } catch (e) {} this.socks.delete(ws); }
     this.socks.set(server, { id, name, seen: Date.now() }); this.sweepOn();
-    this.send(server, { t: 'hello', me: id }); this.all(this.lobby());
-    // someone arriving mid-round watches it and plays the next one
-    if (this.S) this.send(server, { t: 's', s: G.snap(this.S, true) });
+    if (!this.S) { this.S = G.newGame(Date.now() & 0x7fffffff); G.fillBots(this.S); this.k = 0; this.acc = 0; this.last = Date.now(); this.run(); }
+    G.spawnHuman(this.S, id, name);
+    this.send(server, { t: 'hello', me: id }); this.send(server, { t: 's', s: G.snap(this.S, true) }); this.all(this.lobby());
     server.addEventListener('message', (e) => this.onMessage(server, e.data));
     const gone = () => this.leave(server); server.addEventListener('close', gone); server.addEventListener('error', gone);
     return new Response(null, { status: 101, webSocket: client });
   }
   onMessage(ws, data) {
     const me = this.socks.get(ws); if (!me || typeof data !== 'string' || data.length > 300) return; me.seen = Date.now(); let m; try { m = JSON.parse(data); } catch (e) { return; }
-    if (m.t === 'in' && this.ph === 'play' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
-    else if (m.t === 'start' && this.ph !== 'play') this.start();
-    else if (m.t === 'opt' && this.ph !== 'play') { this.fixed = !!m.fixed; this.all(this.lobby()); }
+    if (m.t === 'in' && this.S && m.c && typeof m.c === 'object') G.input(this.S, me.id, { a: +m.c.a, r: m.c.r === -1 || m.c.r === 1 || m.c.r === 0 ? m.c.r : undefined, b: !!m.c.b });
+    else if ((m.t === 'spawn' || m.t === 'start') && this.S) G.spawnHuman(this.S, me.id, me.name);   // back in after a crash
     else if (m.t === 'ping') this.send(ws, { t: 'pong', k: +m.k || 0 });
   }
   leave(ws) { const me = this.socks.get(ws); if (!me) return; this.socks.delete(ws);
-    if (this.S && this.ph === 'play' && !this.people().some((p) => p.id === me.id)) G.removeHuman(this.S, me.id);
-    if (!this.socks.size) { this.stop(); this.S = null; this.ph = 'lobby'; if (this.sweeper) { clearInterval(this.sweeper); this.sweeper = null; } return; }
+    if (this.S && !this.people().some((p) => p.id === me.id)) G.removeHuman(this.S, me.id);
+    if (!this.socks.size) { this.stop(); this.S = null; if (this.sweeper) { clearInterval(this.sweeper); this.sweeper = null; } return; }
     this.all(this.lobby()); }
-  // a phone that has gone quiet for 45 s is gone, even if its connection never said so (phones ping every 20 s)
+  // a phone that has gone quiet for 45 s is gone, even if its connection never said so (phones ping every 2 s)
   sweepOn() { if (this.sweeper) return; this.sweeper = setInterval(() => { const t = Date.now(); for (const [ws, v] of this.socks) if (t - v.seen > 45000) { try { ws.close(4001, 'quiet'); } catch (e) {} this.leave(ws); } }, 10000); }
-  start() {
-    const S = G.newGame(Date.now() & 0x7fffffff, { fixed: this.fixed }); for (const p of this.people()) G.addSnake(S, p.id, p.name, false); G.fillBots(S);
-    this.S = S; this.ph = 'play'; this.k = 0; this.acc = 0; this.last = Date.now();
-    this.all(this.lobby()); this.all({ t: 's', s: G.snap(S, true) }); this.run();
-  }
   run() { if (this.timer) return; this.timer = setInterval(() => this.tick(), TICK); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   tick() {
     const S = this.S; if (!S) return this.stop();
     // real time, whatever the timer does: catch up by whole ticks, every one of them sent, since phones rebuild bodies from them
     const t = Date.now(); this.acc += Math.min(500, t - this.last); this.last = t;
-    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 40 === 0) }); if (S.ph === 'over') break; }
-    if (S.ph === 'over') { this.ph = 'over'; this.stop(); this.all(this.lobby()); }
+    let n = 0; while (this.acc >= TICK && n++ < 6) { this.acc -= TICK; G.step(S); this.k++; this.all({ t: 's', s: G.snap(S, this.k % 200 === 0) }); }
   }
 }
 
@@ -90,7 +85,7 @@ async function telegram(env, request) {
   if (cmd === '/game' || cmd === '/play' || (cmd === '/start' && m.chat.type !== 'private')) {
     // one room for the whole chat: the button takes everyone to the same arena
     const id = newId(), who = m.from ? cleanName(m.from) : '';
-    await tg(env, 'sendMessage', { chat_id: m.chat.id, text: uz ? '🐍 ' + who + ' neon ilonlar jangiga chaqiryapti! 2–6 kishi, bo‘sh joylarni botlar egallaydi.' : '🐍 ' + who + ' зовёт на арену Неон Змеек! От 2 до 6 человек, свободные места займут боты.', reply_markup: { inline_keyboard: [[{ text: uz ? '🎮 Arenaga kirish' : '🎮 На арену', url: link(env, id) }]] } });
+    await tg(env, 'sendMessage', { chat_id: m.chat.id, text: uz ? '🐍 ' + who + ' neon ilonlar arenasiga chaqiryapti! Istalgan payt kiring.' : '🐍 ' + who + ' зовёт на арену Неон Змеек! Заходи в любой момент — арена работает без перерывов.', reply_markup: { inline_keyboard: [[{ text: uz ? '🎮 Arenaga kirish' : '🎮 На арену', url: link(env, id) }]] } });
   } else if (cmd === '/start' || cmd === '/help') {
     await tg(env, 'sendMessage', { chat_id: m.chat.id, text: uz ? 'Chiroqlarni yeng, o‘sing va boshqalarni dumingizga urilishga majbur qiling! Do‘stlar bilan: guruhga qo‘shing va /game yozing.' : 'Ешь огоньки, расти и заставляй других врезаться в твой хвост. Последний живой — победитель.\n\nС друзьями: добавь меня в группу и напиши /game.', reply_markup: { inline_keyboard: [[{ text: uz ? '🐍 O‘ynash' : '🐍 Играть', url: 'https://t.me/' + botName(env) + '?startapp=home' }]] } });
   }

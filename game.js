@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.22';
+import * as G from './sim.js?v=1.23';
 
-export const VERSION = '1.22';
+export const VERSION = '1.23';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -25,7 +25,7 @@ addEventListener('resize', resize); resize();
 const U = { time: { value: 0 } };
 
 // the floor: a grid that glows under every head, a ring where the arena ends
-const HEADS = 6, FLOOR_R = G.R0 + 34;
+const HEADS = 6, FLOOR_R = G.RE + 30;
 // The floor costs nothing per pixel: the background is the clear colour, the grid is thin strips of geometry
 // (only the pixels they cover are drawn), and the edge is a narrow ring plus a dark skirt outside it.
 function gridMesh() {
@@ -39,15 +39,15 @@ function gridMesh() {
 const floor = gridMesh(); floor.position.y = -0.01; scene.add(floor);
 // the edge line with a soft glow outwards, and everything beyond it dimmed
 const floorMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
-  uniforms: { uR: { value: G.R0 }, uWarn: { value: 0 } },
+  uniforms: { uR: { value: G.RE }, uWarn: { value: 0 } },
   vertexShader: `varying vec2 vP; void main(){ vec4 w = modelMatrix*vec4(position,1.); vP = w.xz; gl_Position = projectionMatrix*viewMatrix*w; }`,
   fragmentShader: `uniform float uR, uWarn; varying vec2 vP; void main(){ float dr = length(vP)-uR;
     float line = smoothstep(.22,.0,abs(dr))*.9 + exp(-abs(dr)*3.5)*.22*step(0.,dr), dim = smoothstep(0.,.6,dr)*.75;
     gl_FragColor = vec4(mix(vec3(0.,.94,1.), vec3(1.,.17,.5), uWarn)*line, dim); }` });
-let edgeR = -1; const EDGE_SEG = 128, edge = new THREE.Mesh(new THREE.RingGeometry(G.R0 - 0.6, FLOOR_R + 1, EDGE_SEG, 1), floorMat); edge.rotation.x = -Math.PI/2; edge.position.y = 0.005; edge.renderOrder = 1; scene.add(edge);
+let edgeR = -1; const EDGE_SEG = 128, edge = new THREE.Mesh(new THREE.RingGeometry(G.RE - 0.6, FLOOR_R + 1, EDGE_SEG, 1), floorMat); edge.rotation.x = -Math.PI/2; edge.position.y = 0.005; edge.renderOrder = 1; scene.add(edge);
 function edgeAt(r) { if (Math.abs(r - edgeR) < 0.02) return; edgeR = r; const p = edge.geometry.attributes.position, a = p.array, ri = Math.max(0.1, r - 0.6);
   for (let i = 0; i <= EDGE_SEG; i++) { const t = i/EDGE_SEG*Math.PI*2; a[i*3] = Math.cos(t)*ri; a[i*3 + 1] = Math.sin(t)*ri; } p.clearUpdateRanges(); p.addUpdateRange(0, (EDGE_SEG + 1)*3); p.needsUpdate = true; }
-edgeAt(G.R0);
+edgeAt(G.RE);
 
 // the wall of light around the arena
 const wallMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
@@ -111,7 +111,7 @@ const glowMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
 const glow = new THREE.Points(glowG, glowMat); glow.frustumCulled = false; scene.add(glow);
 
 // food: a bright core inside a soft halo, each light breathing on its own beat
-const FOODN = 900;
+const FOODN = 1600;
 const foodG = new THREE.BufferGeometry();
 foodG.setAttribute('position', new THREE.BufferAttribute(new Float32Array(FOODN*3), 3).setUsage(THREE.DynamicDrawUsage));
 foodG.setAttribute('color', new THREE.BufferAttribute(new Float32Array(FOODN*3), 3).setUsage(THREE.DynamicDrawUsage));
@@ -159,22 +159,36 @@ function arenaLabel(f) { return f ? '⭕ Арена: не сжимается' : 
 let FT0 = performance.now();   // the time of the frame being drawn: prediction and ticks all measure against it
 let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
 let MODE = 'demo', LS = null, M = G.mirror(), ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
+// your snake is (re)born: the death card goes, the controls start fresh
+let DEATH = null, BORN = 0, deathT = 0;
+function born() { BORN = M.tm; DEATH = null; clearTimeout(deathT); AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; KH = null; aim = null; sentA = 99; sentR = 0;
+  if (!$('over').classList.contains('hidden')) show(null); $('hud').classList.add('on'); big('ВПЕРЁД!', 700); haptic('medium'); }
+function showDeath() {
+  if (!DEATH || MODE === 'demo') return; const me = meS(); if (me && me.alive) return;
+  $('hud').classList.remove('on'); $('big').classList.remove('on'); show('over');
+  const m = Math.floor(DEATH.t/60), sec = Math.floor(DEATH.t%60);
+  $('oTitle').innerHTML = 'ТЫ РАЗБИЛСЯ<small>' + (DEATH.by ? 'врезался в ' + esc(DEATH.by) : 'о стену арены') + '</small>';
+  const top = M.sn.filter((o) => o.alive).sort((a, b) => b.L - a.L).slice(0, 5);
+  $('res').innerHTML = '<div class="me"><span class="n">📏 ' + DEATH.L + ' · 💥 ' + DEATH.kills + ' · ⏱ ' + m + ':' + String(sec).padStart(2, '0') + '</span><span class="s">' + DEATH.rank + ' место из ' + DEATH.of + '</span></div>'
+    + '<p class="lb">Сейчас на арене лучшие:</p>' + top.map((r, k) => '<div><span class="p">' + (k + 1) + '</span><i style="color:' + hex(G.COLORS[r.col % G.COLORS.length]) + '"></i><span class="n">' + esc(r.name) + '</span><span class="s">📏 ' + Math.floor(r.L) + '</span></div>').join('');
+  $('oInvite').classList.toggle('hidden', MODE !== 'net');
+}
 function applySnap(o) {
   const evs = G.apply(M, o); curTick = o.tm;
   for (const e of evs) onEvent(e);
-  if (M.ph === 'over' && MODE !== 'demo' && !overShown) { overShown = true; setTimeout(showOver, 1300); }
-  // a new round of your own hides the menus; the bots' round behind the menu never does
-  if (M.ph === 'play' && o.full && o.tm <= 0 && MODE !== 'demo') { overShown = false; show(null); $('hud').classList.add('on'); }
+
 }
 function newLocal(withMe) {
-  LS = G.newGame((Math.random()*1e9) | 0, { fixed: withMe && FIXED }); if (withMe) G.addSnake(LS, 'me', 'Ты', false); G.fillBots(LS); if (!withMe) LS.tm = 0;
+  LS = G.newGame((Math.random()*1e9) | 0); G.fillBots(LS); if (withMe) G.spawnHuman(LS, 'me', 'Ты');
   M = G.mirror(); ME = withMe ? 'me' : null; acc = 0; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; $('feed').innerHTML = ''; lastCount = 99; applySnap(G.snap(LS, true));
 }
-const meS = () => M.sn.find((s) => s.id === ME);
+const meS = () => M.sn.find((s) => s.id === ME && s.alive) || M.sn.find((s) => s.id === ME);
 function nameOf(s) { return s.id === ME ? 'Ты' : s.name; }
 function onEvent(e) {
+  if (e.t === 'spawn') { if (e.w[0] === ME && MODE !== 'demo') born(); return; }
   if (e.t === 'die') { const s = M.sn[e.i]; if (!s) return; const col = G.COLORS[s.col % G.COLORS.length]; burst(e.x, e.z, col, 70);
-    const by = e.by >= 0 ? M.sn[e.by] : null;
+    const by = e.by >= 0 ? M.sn[e.by] : null; if (by) by.kills = (by.kills || 0) + 1;
+    if (s.id === ME && MODE !== 'demo') { DEATH = { L: Math.floor(s.L), kills: s.kills || 0, t: M.tm - (BORN || 0), by: by ? by.name : '', rank: 1 + M.sn.filter((o) => o.alive && o.L > s.L).length, of: M.sn.filter((o) => o.alive).length + 1 }; clearTimeout(deathT); deathT = setTimeout(showDeath, 1400); }
     if (MODE !== 'demo') { feed(by ? nameOf(by) + ' → ' + nameOf(s) : nameOf(s) + ' разбил' + (s.id === ME ? 'ся' : 'ся') + ' о стену', s.id === ME || (by && by.id === ME));
       const me = meS(); const dist = me ? Math.hypot(me.x - e.x, me.z - e.z) : 99;
       if (s.id === ME) { big('Ты разбился!<small>' + (by ? 'врезался в ' + esc(by.name) : 'стена арены') + '</small>', 2200); haptic('heavy'); beep(180, 0.5, 'sawtooth', 0.12, 40); }
@@ -275,6 +289,7 @@ function drawWorld(dt) {
     const hx = mine ? PRED.x : s.px + (s.x - s.px)*al, hz = mine ? PRED.z : s.pz + (s.z - s.pz)*al, Lr = s.pL + (s.L - s.pL)*al, r = G.radius(Lr);
     if (s.id === ME) { HEAD.x = hx; HEAD.z = hz; HEAD.ok = true; }
     v.mat.uniforms.uBoost.value += ((s.boosting ? 1 : 0) - v.mat.uniforms.uBoost.value)*Math.min(1, dt*8);
+    v.mat.uniforms.uFade.value = s.safe ? 0.45 + 0.4*Math.abs(Math.sin(performance.now()/90)) : 1;   // just born: blinking, cannot be hit
     const np = buildTube(v, s, hx, hz, Lr, r, mine ? PRED : null);
     const hr = r*1.18; v.head.position.set(hx, r*0.95, hz); v.head.scale.setScalar(hr);
     const ha = mine ? PRED.a : s.a, fx = Math.cos(ha), fz = Math.sin(ha), sx = -fz, sz = fx;
@@ -317,15 +332,13 @@ let hudT = 0, boardH = '';
 const mini = $('mini').getContext('2d');
 function hud(dt) {
   hudT -= dt; if (hudT > 0 || MODE === 'demo') return; hudT = 0.2;
-  if (M.tm <= 0 && M.ph === 'play') { const n = Math.ceil(-M.tm); if (n !== lastCount && n >= 1) { lastCount = n; big(String(n), 700); beep(440, 0.12, 'square', 0.06); } }
-  else if (lastCount !== 0 && M.ph === 'play') { lastCount = 0; big('ВПЕРЁД!', 800); beep(880, 0.25, 'square', 0.07); haptic('medium'); }
 
-  const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + ' / ' + M.sn.length;
+  const alive = M.sn.filter((s) => s.alive); $('hAlive').textContent = '🐍 ' + alive.length + (MODE === 'net' && NET && NET.players ? ' · 👥 ' + NET.players.length : '');
   const me = meS(); $('hLen').textContent = me ? (me.alive ? '📏 ' + Math.floor(me.L) : '👀 смотришь') : '';
-  const rows = M.sn.slice().sort((a, b) => (b.alive - a.alive) || b.L - a.L);
+  let rows = M.sn.filter((s) => s.alive).sort((a, b) => b.L - a.L); const mi = rows.findIndex((s) => s.id === ME); rows = rows.slice(0, 8); if (mi >= 8) rows.push(M.sn.find((s) => s.id === ME && s.alive));
   const bh = rows.map((s) => '<div class="' + (s.id === ME ? 'me ' : '') + (s.alive ? '' : 'dead') + '">' + esc(nameOf(s)) + ' ' + Math.floor(s.L) + '<i style="color:' + hex(G.COLORS[s.col % G.COLORS.length]) + '"></i></div>').join(''); if (bh !== boardH) { boardH = bh; $('board').innerHTML = bh; }
   // minimap
-  const W = 184, k = W/2/(G.R0 + 2); mini.clearRect(0, 0, W, W); mini.save(); mini.translate(W/2, W/2);
+  const W = 184, k = W/2/((M.R0 || G.RE) + 2); mini.clearRect(0, 0, W, W); mini.save(); mini.translate(W/2, W/2);
   mini.strokeStyle = floorMat.uniforms.uWarn.value > 0.5 ? '#ff2b80' : '#00f0ff'; mini.lineWidth = 2; mini.beginPath(); mini.arc(0, 0, M.R*k, 0, Math.PI*2); mini.stroke();
   for (const s of M.sn) { if (!s.alive) continue; mini.fillStyle = hex(G.COLORS[s.col % G.COLORS.length]); const big = s.id === ME; mini.beginPath(); mini.arc(s.x*k, s.z*k, big ? 6 : 3.5 + Math.min(3, s.L/80), 0, Math.PI*2); mini.fill(); if (big) { mini.strokeStyle = '#fff'; mini.lineWidth = 2; mini.stroke(); } }
   mini.restore();
@@ -334,13 +347,6 @@ function feed(text, mine) { const d = document.createElement('div'); d.textConte
 let bigT = 0; function big(html, ms) { const e = $('big'); e.innerHTML = html; e.classList.add('on'); clearTimeout(bigT); bigT = setTimeout(() => e.classList.remove('on'), ms || 1500); }
 let toastT = 0; function toast(t, ms) { const e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => e.classList.remove('on'), ms || 2000); }
 function show(id) { for (const s of ['home', 'help', 'lobby', 'over']) $(s).classList.toggle('hidden', s !== id); }
-function showOver() {
-  if (M.ph !== 'over' || !M.res) return; $('hud').classList.remove('on'); $('big').classList.remove('on'); show('over');
-  const mine = M.res.find((r) => r.id === ME), place = mine ? mine.place : 0;
-  $('oTitle').innerHTML = place === 1 ? '🏆 ПОБЕДА!' : place ? place + ' МЕСТО' : 'РАУНД ОКОНЧЕН';
-  $('res').innerHTML = M.res.map((r) => '<div class="' + (r.id === ME ? 'me' : '') + '"><span class="p">' + r.place + '</span><i style="color:' + hex(G.COLORS[(M.sn[r.i] || {}).col % G.COLORS.length || 0]) + '"></i><span class="n">' + esc(r.id === ME ? 'Ты' : r.name) + '</span><span class="s">📏 ' + r.L + (r.kills ? ' · 💥 ' + r.kills : '') + '</span></div>').join('');
-  if (place === 1) haptic('heavy');
-}
 
 // ---- controls: drag anywhere to steer, a second finger or the button to dash ----
 // Directions are measured on the floor, not on the glass: the camera looks down at an angle.
@@ -396,7 +402,7 @@ function controls(dt) {
 // ---- rooms -------------------------------------------------------------
 function netJoin(room) {
   netLeave(); LS = null; MODE = 'net'; M = G.mirror(); overShown = false; Q.length = 0; lastTick = playTick = curTick = 0;
-  const N = NET = { room, ws: null, me: null, players: [], tries: 0, link: 'https://t.me/' + BOT + '?startapp=r_' + room }; show('lobby'); $('lWho').textContent = 'Подключаюсь…'; $('lList').innerHTML = '';
+  const N = NET = { room, ws: null, me: null, players: [], tries: 0, link: 'https://t.me/' + BOT + '?startapp=r_' + room }; show(null); $('hud').classList.add('on'); toast('Подключаюсь к арене…', 1500);
   const open = () => { if (NET !== N) return; const ws = N.ws = new WebSocket((zt().ws || API.replace('https:', 'wss:')) + '/ws?room=' + room + '&init=' + encodeURIComponent(initStr()));
     ws.onopen = () => { N.tries = 0; };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } netMsg(N, m); };
@@ -407,13 +413,9 @@ function netMsg(N, m) {
   if (m.t === 'hello') { N.me = m.me; ME = m.me; }
   else if (m.t === 'pong') { if (m.k) { const r = (performance.now() - m.k)/1000; if (r > 0 && r < 2) RTT = RTT*0.7 + r*0.3; } }
   else if (m.t === 'full') { toast('Комната заполнена', 2500); goHome(); }
-  else if (m.t === 'lobby') { N.players = m.players; N.fixed = !!m.fixed; $('lArena').textContent = arenaLabel(N.fixed);
-    const bots = Math.max(0, G.MAXS - m.players.length);
-    $('lList').innerHTML = m.players.map((p) => '<span>' + (p.id === N.me ? '⭐ ' : '') + esc(p.name) + '</span>').join('') + (bots ? '<span class="bot">🤖 ×' + bots + '</span>' : '');
-    $('lWho').textContent = m.players.length < 2 ? 'Пока ты один. Позови друзей — или начинай с ботами.' : 'В комнате ' + m.players.length + ' из ' + G.MAXS + '. Свободные места займут боты. Начать может любой.';
-    if (m.ph === 'play' && !$('lobby').classList.contains('hidden') && M.ready) { show(null); $('hud').classList.add('on'); }
-    if (m.ph !== 'play' && $('over').classList.contains('hidden')) { show('lobby'); $('hud').classList.remove('on'); } }
-  else if (m.t === 's') { netSnap(m.s); if (m.s.full && M.ph === 'play' && $('over').classList.contains('hidden')) { show(null); $('hud').classList.add('on'); } }
+  else if (m.t === 'lobby') { const before = (N.players || []).map((p) => p.id); N.players = m.players;
+    for (const p of m.players) if (before.length && !before.includes(p.id) && p.id !== N.me) feed('👋 ' + p.name + ' зашёл на арену'); }
+  else if (m.t === 's') netSnap(m.s);
 }
 // phones get ticks unevenly over the air; play them back a couple of ticks late, at an even pace
 function netSnap(s) {
@@ -441,15 +443,13 @@ function netInvite() { if (!NET) return; const N = NET;
   fetch((zt().api || API) + '/share', { method: 'POST', body: JSON.stringify({ init: initStr(), room: N.room }) }).then((r) => r.json()).then((r) => { if (r && r.ok) { try { TG.shareMessage(r.id); } catch (e) { old(); } } else old(); }).catch(old); }
 function goHome() { netLeave(); MODE = 'demo'; ME = null; $('hud').classList.remove('on'); show('home'); newLocal(false); }
 
-$('goSolo').onclick = () => { MODE = 'solo'; overShown = false; aim = null; sentA = 99; sentR = 0; src = null; KH = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
+$('goSolo').onclick = () => { MODE = 'solo'; aim = null; sentA = 99; sentR = 0; src = null; KH = null; newLocal(true); show(null); $('hud').classList.add('on'); beep(1, 0.01); };
 $('goNet').onclick = netNew;
-$('goArena').textContent = arenaLabel(FIXED);
-$('goArena').onclick = () => { FIXED = !FIXED; try { localStorage.setItem('fixed', FIXED ? '1' : '0'); } catch (e) {} $('goArena').textContent = arenaLabel(FIXED); haptic('light'); };
-$('lArena').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send(JSON.stringify({ t: 'opt', fixed: !NET.fixed })); };
 $('goHelp').onclick = () => show('help'); $('helpBack').onclick = () => show('home');
 $('lStart').onclick = () => { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); };
 $('lInvite').onclick = netInvite; $('lLeave').onclick = goHome; $('toHome').onclick = goHome;
-$('again').onclick = () => { aim = null; if (MODE === 'net') { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"start"}'); show('lobby'); } else $('goSolo').onclick(); };
+$('again').onclick = () => { if (MODE === 'net') { if (NET && NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"spawn"}'); } else if (LS) G.spawnHuman(LS, 'me', 'Ты'); };
+$('oInvite').onclick = netInvite;
 
 // ---- the loop: fixed-step rules, free-running pictures, and a speed check ----
 const PROF = { draw: 0, render: 0 };

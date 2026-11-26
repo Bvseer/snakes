@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the server and the game rules
-        run: node --check server/worker.js && node test/sim.test.mjs && node test/bots.test.mjs
+        run: node --check server/worker.js && node test/sim.test.mjs && node test/bots.test.mjs && node test/endless.test.mjs
       - name: Deploy to Cloudflare
         if: ${{ env.CF_TOKEN != '' }}
         uses: cloudflare/wrangler-action@v3

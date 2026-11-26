@@ -2,9 +2,11 @@
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
-export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 6;
+export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
+// the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
+export const RE = 90, BOTMIN = 8, SAFE = 1.5;
 export const COLORS = [0x00f0ff, 0xff2bd6, 0x7cff3a, 0xffb020, 0x9b6bff, 0xff4040, 0x30ffb0, 0xfff04a];
-const BOTS = ['Кобра', 'Питон', 'Мамба', 'Гадюка', 'Анаконда', 'Удав', 'Тайпан', 'Уж'];
+const BOTS = ['Кобра', 'Питон', 'Мамба', 'Гадюка', 'Анаконда', 'Удав', 'Тайпан', 'Уж', 'Гюрза', 'Эфа', 'Аспид', 'Полоз', 'Медянка', 'Боа', 'Ехидна', 'Крайт'];
 
 export const radius = (L) => 0.62 + Math.min(0.6, L/450);
 export const arenaR = (tm) => tm < SHRINK ? R0 : Math.max(RMIN, R0 - (R0 - RMIN)*(tm - SHRINK)/(ROUND - SHRINK - 10));
@@ -14,8 +16,11 @@ const wrap = (a) => { while (a > Math.PI) a -= 2*Math.PI; while (a < -Math.PI) a
 // seeded random so a solo round and its replay agree; the server seeds from the clock
 export function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s/4294967296; }; }
 
+// Two kinds of game. The endless arena (what people play): big, never ends; snakes are born as others die and
+// anyone can come in or come back at any time. The round (kept for tests and the bot tournament): last one standing.
 export function newGame(seed, opt) {
-  return { fixed: !!(opt && opt.fixed), tm: -3, ph: 'play', R: R0, rnd: rng(seed || Date.now()), sn: [], food: [], fid: 1, ev: [], fa: [], fr: [], deaths: 0, humans: 0 };
+  const round = !!(opt && opt.round), R = round ? R0 : RE;
+  return { round, fixed: round ? !!opt.fixed : true, R0: R, tm: round ? -3 : 0, ph: 'play', R, rnd: rng(seed || Date.now()), sn: [], food: [], fid: 1, ev: [], fa: [], fr: [], deaths: 0, humans: 0, popT: 0, born: 0, pend: [], inStep: false };
 }
 
 // the body: points SEG apart behind the head. Same inputs give the same points on every machine.
@@ -29,31 +34,68 @@ export function addHead(s, x, z) {
   const keep = Math.max(2, Math.ceil(s.L)); if (t.length > keep) t.length = keep;
 }
 
+// where to put a new snake in the endless arena: the spot furthest from every head and body, facing the open middle
+function spawnSpot(S) {
+  let best = null, bd = -1;
+  for (let n = 0; n < 40; n++) { const r = Math.sqrt(0.05 + S.rnd()*0.7)*S.R, a = S.rnd()*Math.PI*2, x = Math.cos(a)*r, z = Math.sin(a)*r; let d = 1e9;
+    for (const o of S.sn) { if (!o.alive) continue; for (let k = 0; k < o.tr.length; k += 4) { const p = o.tr[k], dd = (p[0] - x)*(p[0] - x) + (p[1] - z)*(p[1] - z); if (dd < d) d = dd; } }
+    if (d > bd) { bd = d; best = [x, z]; } if (d > 400) break; }
+  const ang = Math.atan2(-best[1], -best[0]) + (S.rnd() - 0.5)*1.2; return [q(best[0]), q(best[1]), wrap(ang)];
+}
 export function addSnake(S, id, name, bot) {
-  if (S.sn.length >= MAXS) return null;
-  const i = S.sn.length, ang = i/MAXS*Math.PI*2 + 0.3, r = R0*0.62;
-  const x = q(Math.cos(ang)*r), z = q(Math.sin(ang)*r), a = wrap(ang + Math.PI/2);   // everyone starts on a ring, going round it
-  const s = { i, id: String(id), name: String(name).slice(0, 16), bot: !!bot, col: i, x, z, a, ta: a, boost: false, L: L0, tr: [], alive: true, kills: 0, place: 0, dropT: 0, best: L0,
+  let i, x, z, a;
+  if (S.round) {
+    if (S.sn.length >= ROUNDS) return null;
+    i = S.sn.length; const ang = i/ROUNDS*Math.PI*2 + 0.3, r = R0*0.62;
+    x = q(Math.cos(ang)*r); z = q(Math.sin(ang)*r); a = wrap(ang + Math.PI/2);   // everyone starts on a ring, going round it
+  } else {
+    // a free place: a new one, or one whose snake died a while ago (a person gets their own old one back)
+    i = S.sn.findIndex((o) => !o.alive && o.id === String(id));
+    if (i < 0) i = S.sn.findIndex((o) => !o.alive && o.bot && S.tm - (o.deadAt || 0) > 2);
+    if (i < 0) { if (S.sn.length >= MAXS) return null; i = S.sn.length; }
+    [x, z, a] = spawnSpot(S);
+  }
+  // a colour nobody else on the field is wearing, if there is one (a person keeps theirs)
+  let col = i; if (!S.round) { if (S.sn[i] && S.sn[i].id === String(id)) col = S.sn[i].col; else { const used = COLORS.map((_, c) => S.sn.filter((o) => o.alive && o.col === c).length); const low = Math.min(...used); const free = used.map((u, c) => u === low ? c : -1).filter((c) => c >= 0); col = free[Math.floor(S.rnd()*free.length)]; } }
+  const s = { i, id: String(id), name: String(name).slice(0, 16), bot: !!bot, col, x, z, a, ta: a, boost: false, L: L0, tr: [], alive: true, kills: 0, place: 0, dropT: 0, best: L0,
+    safe: S.round ? 0 : S.tm + SAFE, born: S.tm, n: 0,
     ai: bot ? { skill: 0.8 + S.rnd()*0.2, goal: null, think: 0, hunt: 0, v: 2 } : null };
   // a short straight tail behind the start point
   for (let k = Math.ceil(L0); k >= 0; k--) addHead(s, q(x - Math.cos(a)*k*SEG), q(z - Math.sin(a)*k*SEG));
-  if (!bot) S.humans++; S.sn.push(s); return s;
+  if (!bot) S.humans++; S.sn[i] = s;
+  // born between ticks (someone came in): told with the next tick, before it moves
+  if (!S.round) (S.inStep ? S.ev : S.pend).push({ t: 'spawn', i, w: [s.id, s.name, s.bot ? 1 : 0, s.col], tr: s.tr.map((p) => [Math.round(p[0]*100), Math.round(p[1]*100)]), x: s.x, z: s.z, a: s.a });
+  return s;
 }
-export function fillBots(S) { let k = 0; const from = Math.floor(S.rnd()*8); while (S.sn.length < MAXS) { addSnake(S, 'bot' + k, BOTS[(from + k) % 8], true); k++; } }
+let botNo = 0;
+// a bot with a name nobody on the field has right now
+function addBot(S) { const k = botNo++, taken = new Set(S.sn.filter((o) => o.alive).map((o) => o.name)), free = BOTS.filter((n) => !taken.has(n)), pool = free.length ? free : BOTS;
+  return addSnake(S, 'bot' + k + '_' + Math.floor(S.rnd()*1e6), pool[Math.floor(S.rnd()*pool.length)], true); }
+export function fillBots(S) { if (S.round) { let k = 0; const from = Math.floor(S.rnd()*8); while (S.sn.length < ROUNDS) { addSnake(S, 'bot' + k, BOTS[(from + k) % 8], true); k++; } return; }
+  while (S.sn.filter((o) => o.alive).length < BOTMIN && addBot(S)); }
+// a person comes in, or comes back after crashing: into the arena at once
+export function spawnHuman(S, id, name) { const s = S.sn.find((v) => v.alive && v.id === String(id)); return s || addSnake(S, id, name, false); }
+// the endless arena keeps itself busy: whenever fewer snakes are alive than it wants, a bot is born (one a second at most)
+function population(S) {
+  S.popT -= TICK; if (S.popT > 0) return;
+  const alive = S.sn.filter((o) => o.alive), people = alive.filter((o) => !o.bot).length, want = Math.min(MAXS, Math.max(BOTMIN, people + 7));
+  if (alive.length < want) addBot(S);
+  S.popT = alive.length + 1 < want ? 0.35 : 1;   // a big gap fills quickly, a small one at an easy pace
+}
 // two ways to steer: a heading to turn toward (finger), or "keep turning this way while the key is held" (keys)
-export function input(S, id, c) { const s = S.sn.find((v) => v.id === String(id)); if (!s || !s.alive || !c) return;
+export function input(S, id, c) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (!s || !c) return;
   if (c.r === -1 || c.r === 0 || c.r === 1) { s.turn = c.r; if (!c.r) s.ta = s.a; } else if (Number.isFinite(c.a)) { s.turn = 0; s.ta = wrap(c.a); }
   s.boost = !!c.b; }
-export function removeHuman(S, id) { const s = S.sn.find((v) => v.id === String(id)); if (s && s.alive) die(S, s, null); }
+export function removeHuman(S, id) { const s = S.sn.find((v) => v.alive && v.id === String(id)); if (s) die(S, s, null); }
 
 function food(S, x, z, v, corpse) { const f = [S.fid++, q(x), q(z), v, corpse ? S.tm : -1]; S.food.push(f); S.fa.push(f); return f; }
 function topUpFood(S) {
-  const want = 70 + 22*S.sn.filter((s) => s.alive).length;
+  const n = S.sn.filter((s) => s.alive).length, want = S.round ? 70 + 22*n : 440 + 20*n;
   for (let n = 0; S.food.length < want && n < 12; n++) { const r = Math.sqrt(S.rnd())*(S.R - 3), a = S.rnd()*Math.PI*2; food(S, Math.cos(a)*r, Math.sin(a)*r, S.rnd() < 0.1 ? 2 : 0.7); }
 }
 
 function die(S, s, by) {
-  s.alive = false; s.boost = false; s.place = S.sn.filter((v) => v.alive).length + 1; S.deaths++;
+  s.alive = false; s.boost = false; s.deadAt = S.tm; s.place = S.sn.filter((v) => v.alive).length + 1; S.deaths++;
   if (by && by !== s) by.kills++;
   // the body turns into food: whoever is near gets fat
   for (let k = 0; k < s.tr.length; k += 2) { const p = s.tr[k]; if (Math.hypot(p[0], p[1]) < S.R - 1) food(S, p[0] + (S.rnd() - 0.5)*0.8, p[1] + (S.rnd() - 0.5)*0.8, 1.2, true); }
@@ -133,7 +175,7 @@ function coil(S, s) {
 const CELL = 3, HIT = { k: 0 };
 function grid(S) {
   const g = new Map();
-  for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L);
+  for (const s of S.sn) { if (!s.alive || s.safe > S.tm) continue; const r = radius(s.L);
     for (let k = 0; k < s.tr.length; k++) { const p = s.tr[k], key = Math.floor(p[0]/CELL)*1000 + Math.floor(p[1]/CELL); let c = g.get(key); if (!c) g.set(key, c = []); c.push(s, p[0], p[1], r, k); } }
   return g;
 }
@@ -169,10 +211,13 @@ function think(S, s, g) {
 }
 
 export function step(S) {
-  S.ev = []; S.fa = []; S.fr = [];
+  S.ev = S.pend || []; S.pend = []; S.fa = []; S.fr = []; S.inStep = true;
+  try { stepIn(S); } finally { S.inStep = false; }
+}
+function stepIn(S) {
   if (S.ph !== 'play') return;
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
-  S.R = S.fixed ? R0 : q(arenaR(S.tm));   // fixed: the arena never closes in
+  S.R = S.fixed ? S.R0 : q(arenaR(S.tm));   // fixed: the arena never closes in
   let g = grid(S);
   for (const s of S.sn) if (s.alive && s.bot) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
@@ -190,6 +235,7 @@ export function step(S) {
   g = grid(S); const hits = new Map();
   for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L);
     if (Math.hypot(s.x, s.z) > S.R) { hits.set(s, { o: null, k: 0 }); continue; }   // the wall: only when the middle of the head crosses the line
+    if (s.safe > S.tm) continue;   // just born: blinking, cannot crash into anyone yet
     const o = hit(g, s.x, s.z, r, s, false); if (o) hits.set(s, { o, k: HIT.k }); }
   const FRONT = 2;
   for (const [s, h] of hits) { if (!s.alive) continue; const o = h.o, back = o && hits.get(o);
@@ -210,8 +256,9 @@ export function step(S) {
     else for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L) + 0.9, dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz < r*r) { s.L = q(s.L + f[3]); s.best = Math.max(s.best, s.L); eaten = true; S.ev.push({ t: 'eat', i: s.i, v: f[3] >= 1 ? 1 : 0 }); break; } }
     if (eaten) S.fr.push(f[0]); else keep.push(f); }
   S.food = keep; topUpFood(S);
+  if (!S.round) { population(S); return; }   // the endless arena never ends
   const alive = S.sn.filter((s) => s.alive), humansAlive = alive.filter((s) => !s.bot).length;
-  // no clock: the round goes on until one snake is left (or no people are left in it)
+  // a round: no clock, it goes on until one snake is left (or no people are left in it)
   if (alive.length <= 1 || (S.humans > 0 && humansAlive === 0)) end(S);
 }
 
@@ -226,27 +273,31 @@ export function results(S) { return S.sn.slice().sort((a, b) => a.place - b.plac
 // ---- the wire --------------------------------------------------------------
 // every tick: heads, length, a few flags; food that came and went; events. Every so often the whole picture.
 export function snap(S, full) {
-  const o = { tm: Math.round(S.tm*20), R: S.R, sn: S.sn.map((s) => [s.i, Math.round(s.x*100), Math.round(s.z*100), Math.round(s.a*100), Math.round(s.L*100), (s.alive ? 1 : 0) | (s.boosting ? 2 : 0)]), ev: S.ev };
+  const o = { tm: Math.round(S.tm*20), R: S.R, sn: S.sn.map((s) => [s.i, Math.round(s.x*100), Math.round(s.z*100), Math.round(s.a*100), Math.round(s.L*100), (s.alive ? 1 : 0) | (s.boosting ? 2 : 0) | (s.alive && s.safe > S.tm ? 4 : 0)]), ev: S.ev };
   if (S.fa.length) o.fa = S.fa.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]);
   if (S.fr.length) o.fr = S.fr;
-  if (full) { o.full = 1; o.fixed = S.fixed ? 1 : 0; o.ph = S.ph; o.who = S.sn.map((s) => [s.id, s.name, s.bot ? 1 : 0, s.col]); o.tr = S.sn.map((s) => s.tr.map((p) => [Math.round(p[0]*100), Math.round(p[1]*100)])); o.food = S.food.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]); }
+  if (full) { o.full = 1; o.fixed = S.fixed ? 1 : 0; o.R0 = S.R0; o.ph = S.ph; o.who = S.sn.map((s) => [s.id, s.name, s.bot ? 1 : 0, s.col]); o.tr = S.sn.map((s) => s.tr.map((p) => [Math.round(p[0]*100), Math.round(p[1]*100)])); o.food = S.food.map((f) => [f[0], Math.round(f[1]*100), Math.round(f[2]*100), Math.round(f[3]*10)]); }
   if (S.ph === 'over') { o.ph = 'over'; o.res = results(S); }
   return o;
 }
 
 // a phone's copy of the world, kept up to date from snapshots
-export function mirror() { return { fixed: false, tm: 0, R: R0, ph: 'play', sn: [], food: new Map(), ready: false, res: null }; }
+export function mirror() { return { fixed: false, R0: RE, tm: 0, R: RE, ph: 'play', sn: [], food: new Map(), ready: false, res: null }; }
 export function apply(M, o) {
-  if (o.full) { M.ready = true; M.fixed = !!o.fixed; const old = M.sn; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, pL: L0, n: old[i] && old[i].id === w[0] ? old[i].n || 0 : 0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, px: 0, pz: 0 }));
+  if (o.full) { M.ready = true; M.fixed = !!o.fixed; M.R0 = o.R0 || R0; const old = M.sn; M.sn = o.who.map((w, i) => ({ i, id: w[0], name: w[1], bot: !!w[2], col: w[3], x: 0, z: 0, a: 0, L: L0, pL: L0, n: old[i] && old[i].id === w[0] ? old[i].n || 0 : 0, tr: o.tr[i].map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, safe: false, kills: 0, px: 0, pz: 0 }));
     M.food = new Map(); for (const f of o.food) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]); }
   if (!M.ready) return [];
   M.tm = o.tm/20; M.R = o.R; if (o.ph) M.ph = o.ph; if (o.res) M.res = o.res;
+  if (o.ev && !o.full) for (const e of o.ev) if (e.t === 'spawn')
+    M.sn[e.i] = { i: e.i, id: e.w[0], name: e.w[1], bot: !!e.w[2], col: e.w[3], x: e.x, z: e.z, a: e.a, pa: e.a, px: e.x, pz: e.z, L: L0, pL: L0, n: 0, tr: e.tr.map((p) => [p[0]/100, p[1]/100]), alive: true, boosting: false, safe: true, kills: 0 };
   for (const h of o.sn) { const s = M.sn[h[0]]; if (!s) continue; s.px = s.x; s.pz = s.z; s.pa = s.a;
     const x = h[1]/100, z = h[2]/100;
     // the server grew the body with last tick's length, so must we
     if (o.full) { s.x = x; s.z = z; s.px = x; s.pz = z; } else if (s.alive) addHead(s, x, z);
-    s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.alive = !!(h[5] & 1); }
-  if (o.ev && !o.full) for (const e of o.ev) if (e.t === 'sq' && M.sn[e.i]) squeeze(M.sn[e.i], e.k, e.cx, e.cz, e.f);
+    s.pL = o.full ? h[4]/100 : s.L; s.L = h[4]/100; s.a = h[3]/100; if (o.full) s.pa = s.a; s.boosting = !!(h[5] & 2); s.safe = !!(h[5] & 4); s.alive = !!(h[5] & 1); }
+  if (o.ev && !o.full) for (const e of o.ev) {
+    if (e.t === 'sq' && M.sn[e.i]) squeeze(M.sn[e.i], e.k, e.cx, e.cz, e.f);
+  }
   if (o.fr || o.fa || o.full) M.fv = (M.fv || 0) + 1;
   if (o.fr) for (const id of o.fr) M.food.delete(id);
   if (o.fa) for (const f of o.fa) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]);
