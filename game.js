@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.23';
+import * as G from './sim.js?v=1.24';
 
-export const VERSION = '1.23';
+export const VERSION = '1.24';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -74,7 +74,7 @@ function tubeIndex() { const idx = []; for (let i = 0; i < MAXPT - 1; i++) for (
 const IDX = tubeIndex();
 const eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff }), eyeB = new THREE.MeshBasicMaterial({ color: 0x05060d });
 const eyeG = new THREE.SphereGeometry(1, 10, 6);
-const EYEW = new THREE.InstancedMesh(eyeG, eyeW, 12), EYEB = new THREE.InstancedMesh(eyeG, eyeB, 12), eyeM = new THREE.Matrix4();
+const EYEW = new THREE.InstancedMesh(eyeG, eyeW, G.MAXS*2), EYEB = new THREE.InstancedMesh(eyeG, eyeB, G.MAXS*2), eyeM = new THREE.Matrix4();   // two eyes for every snake there can be
 EYEW.frustumCulled = EYEB.frustumCulled = false; scene.add(EYEW, EYEB); let ei = 0;
 function label(text, col) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
