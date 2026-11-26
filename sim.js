@@ -1,7 +1,7 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
-export const VERSION = '1.31';   // one number for the page and the server: they tell each other which one they are
+export const VERSION = '1.32';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
@@ -200,17 +200,26 @@ function overlaps(S, s) {
 }
 
 // every body point, by cell, for collisions and for bots looking where they go
-const CELL = 3, HIT = { k: 0 };
+// Kept in flat arrays that are filled again every tick, so nothing is thrown away (no pauses to collect garbage,
+// which on a phone playing alone showed as hitches). Each game has its own.
+const CELL = 3, GW = 72, GOFF = 108, HIT = { k: 0 };
+function newGrid() { return { stamp: 0, n: 0, cap: 8192, cs: new Int32Array(GW*GW), head: new Int32Array(GW*GW), tail: new Int32Array(GW*GW),
+  next: new Int32Array(8192), x: new Float64Array(8192), z: new Float64Array(8192), r: new Float64Array(8192), k: new Int32Array(8192), who: new Array(8192) }; }
+function growGrid(G) { const cap = G.cap*2, cp = (A, a) => { const b = new A(cap); b.set(a); return b; };
+  G.next = cp(Int32Array, G.next); G.x = cp(Float64Array, G.x); G.z = cp(Float64Array, G.z); G.r = cp(Float64Array, G.r); G.k = cp(Int32Array, G.k); G.who.length = cap; G.cap = cap; }
+const cellOf = (v) => { const c = Math.floor((v + GOFF)/CELL); return c < 0 ? 0 : c >= GW ? GW - 1 : c; };
 function grid(S) {
-  const g = new Map();
-  for (const s of S.sn) { if (!s.alive || s.safe > S.tm) continue; const r = radius(s.L), n1 = Math.max(1, s.tr.length - 1);
-    for (let k = 0; k < s.tr.length; k++) { const p = s.tr[k], key = Math.floor(p[0]/CELL)*1000 + Math.floor(p[1]/CELL); let c = g.get(key); if (!c) g.set(key, c = []); c.push(s, p[0], p[1], r*taper(k/n1), k); } }
-  return g;
+  const G = S.G || (S.G = newGrid()); G.stamp++; G.n = 0;
+  for (const s of S.sn) { if (!s.alive || s.safe > S.tm) continue; const r = radius(s.L), t = s.tr, n1 = Math.max(1, t.length - 1);
+    for (let k = 0; k < t.length; k++) { const p = t[k], c = cellOf(p[0])*GW + cellOf(p[1]), n = G.n++; if (n >= G.cap) growGrid(G);
+      G.who[n] = s; G.x[n] = p[0]; G.z[n] = p[1]; G.r[n] = r*taper(k/n1); G.k[n] = k; G.next[n] = -1;
+      if (G.cs[c] !== G.stamp) { G.cs[c] = G.stamp; G.head[c] = n; } else G.next[G.tail[c]] = n; G.tail[c] = n; } }
+  return G;
 }
-function hit(g, x, z, r, me, skipOwn) {
-  const cx = Math.floor(x/CELL), cz = Math.floor(z/CELL);
-  for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) { const c = g.get(i*1000 + j); if (!c) continue;
-    for (let n = 0; n < c.length; n += 5) { const o = c[n]; if (o === me) continue; const dx = c[n + 1] - x, dz = c[n + 2] - z, rr = c[n + 3] + r; if (dx*dx + dz*dz < rr*rr*0.8) { HIT.k = c[n + 4]; return o; } } }
+function hit(G, x, z, r, me, skipOwn) {
+  const cx = cellOf(x), cz = cellOf(z), i0 = cx > 0 ? cx - 1 : 0, i1 = cx < GW - 1 ? cx + 1 : cx, j0 = cz > 0 ? cz - 1 : 0, j1 = cz < GW - 1 ? cz + 1 : cz;
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const c = i*GW + j; if (G.cs[c] !== G.stamp) continue;
+    for (let n = G.head[c]; n >= 0; n = G.next[n]) { if (G.who[n] === me) continue; const dx = G.x[n] - x, dz = G.z[n] - z, rr = G.r[n] + r; if (dx*dx + dz*dz < rr*rr*0.8) { HIT.k = G.k[n]; return G.who[n]; } } }
   return null;
 }
 
@@ -246,8 +255,10 @@ function stepIn(S) {
   if (S.ph !== 'play') return;
   S.tm = q(S.tm + TICK); if (S.tm <= 0) return;   // three seconds to look around before anyone moves
   S.R = S.fixed ? S.R0 : q(arenaR(S.tm));   // fixed: the arena never closes in
-  let g = grid(S);
-  for (const s of S.sn) if (s.alive && (s.bot || s.auto)) (s.ai.v === 1 ? think : think2)(S, s, g);
+  // Bots look at the field as the last tick left it (nothing has moved since), and each thinks on every other tick:
+  // half of them now, half next time. Their lookahead is over a second, so they lose nothing by it.
+  let g = S.G || grid(S); S.k = (S.k | 0) + 1;
+  for (const s of S.sn) if (s.alive && (s.bot || s.auto) && (((S.k + s.i) & 1) === 0 || !s.ai.goal)) (s.ai.v === 1 ? think : think2)(S, s, g);
   // move: turn toward where the finger points, then straight ahead for one tick
   for (const s of S.sn) { if (!s.alive) continue;
     // a blinking snake (newborn, or its owner's connection is failing) cannot defend itself: it is turned away from the wall
@@ -282,12 +293,12 @@ function stepIn(S) {
     }
     die(S, s, o); }
   // eating, and food the closing wall burns
-  const keep = [];
-  for (const f of S.food) { let eaten = false;
+  let kept = 0; const fd = S.food;
+  for (let fi = 0; fi < fd.length; fi++) { const f = fd[fi]; let eaten = false;
     if (Math.hypot(f[1], f[2]) > S.R - 0.3) eaten = true;
     else for (const s of S.sn) { if (!s.alive) continue; const r = radius(s.L) + 0.9, dx = f[1] - s.x, dz = f[2] - s.z; if (dx*dx + dz*dz < r*r) { s.L = q(s.L + f[3]); s.best = Math.max(s.best, s.L); eaten = true; S.ev.push({ t: 'eat', i: s.i, v: f[3] >= 1 ? 1 : 0 }); break; } }
-    if (eaten) S.fr.push(f[0]); else keep.push(f); }
-  S.food = keep; topUpFood(S);
+    if (eaten) S.fr.push(f[0]); else fd[kept++] = f; }
+  fd.length = kept; topUpFood(S);
   if (!S.round) { population(S); return; }   // the endless arena never ends
   const alive = S.sn.filter((s) => s.alive), humansAlive = alive.filter((s) => !s.bot).length;
   // a round: no clock, it goes on until one snake is left (or no people are left in it)

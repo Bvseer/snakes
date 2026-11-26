@@ -1,6 +1,6 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.31';
+import * as G from './sim.js?v=1.32';
 
 const VERSION = G.VERSION;
 // the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
@@ -18,7 +18,7 @@ const HIDPI = (window.devicePixelRatio || 1) >= 2;
 const R = new THREE.WebGLRenderer({ canvas, antialias: !HIDPI, powerPreference: 'high-performance' });
 R.setClearColor(0x04060e); R.outputColorSpace = THREE.SRGBColorSpace;
 const TOUCH = matchMedia('(pointer: coarse)').matches;
-let DPR = Math.min(window.devicePixelRatio || 1, TOUCH ? 1.35 : 1.5); R.setPixelRatio(DPR);
+let DPR = Math.min(window.devicePixelRatio || 1, TOUCH ? 1.25 : 1.5); R.setPixelRatio(DPR);
 const scene = new THREE.Scene(); scene.fog = new THREE.Fog(0x04060e, 55, 120);
 const cam = new THREE.PerspectiveCamera(50, 1, 0.5, 400);
 function resize() { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w/h; cam.fov = w < h ? 64 : 48; cam.updateProjectionMatrix(); }
@@ -32,7 +32,7 @@ const HEADS = 6, FLOOR_R = G.RE + 30;
 function gridMesh() {
   const pos = [], col = [], E = FLOOR_R, add = (x0, z0, x1, z1, w, c) => { const dx = x1 - x0, dz = z1 - z0, l = Math.hypot(dx, dz), nx = -dz/l*w/2, nz = dx/l*w/2;
     const v = [[x0 + nx, z0 + nz], [x0 - nx, z0 - nz], [x1 + nx, z1 + nz], [x1 - nx, z1 - nz]]; for (const k of [0, 1, 2, 2, 1, 3]) { pos.push(v[k][0], 0, v[k][1]); col.push(c[0], c[1], c[2]); } };
-  for (let k = -Math.floor(E/2)*2; k <= E; k += 2) { const major = k % 10 === 0, half = Math.sqrt(Math.max(0, E*E - k*k)); if (half < 1) continue; const w = major ? 0.09 : 0.05, c = major ? [0, 0.075, 0.11] : [0, 0.03, 0.05];
+  for (let k = -Math.floor(E/5)*5; k <= E; k += 5) { const major = k % 10 === 0, half = Math.sqrt(Math.max(0, E*E - k*k)); if (half < 1) continue; const w = major ? 0.09 : 0.06, c = major ? [0, 0.075, 0.11] : [0, 0.04, 0.062];
     add(k, -half, k, half, w, c); add(-half, k, half, k, w, c); }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, fog: true, side: THREE.DoubleSide }));
@@ -59,8 +59,17 @@ const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2.2, 96, 1, true), 
 
 // ---- snakes: a lit neon tube each, built fresh from the body points every frame ----
 const MAXPT = 720, RING = 8;
-const tubeVS = `attribute float aU; varying vec3 vN, vV, vW; varying float vU;
-  void main(){ vU = aU; vW = normal; vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalMatrix*normal; vV = -mv.xyz; gl_Position = projectionMatrix*mv; }`;
+// A body is a tube round a line of points. The phone sends the graphics chip only that line (four numbers a point:
+// x, z, thickness, stripe position) as a tiny texture; the chip itself puts the eight-sided ring round every point.
+// That is 14 times less to build and send every frame than making every vertex here (the way three.js draws skeletons).
+const tubeVS = `uniform sampler2D uPts; uniform float uN, uY; attribute float aI, aC, aS; varying vec3 vN, vV, vW; varying float vU;
+  void main(){ int i = int(aI + .5), n = int(uN + .5);
+    vec4 p = texelFetch(uPts, ivec2(i, 0), 0), a = texelFetch(uPts, ivec2(max(i - 1, 0), 0), 0), b = texelFetch(uPts, ivec2(min(i + 1, n - 1), 0), 0);
+    vec2 t = a.xy - b.xy; float tl = length(t); t = tl > 1e-5 ? t/tl : vec2(1., 0.);
+    vec3 nrm = vec3(-t.y*aC, aS, t.x*aC), pos = vec3(p.x, uY, p.y) + nrm*p.z;
+    vU = p.w; vW = nrm; vec4 mv = modelViewMatrix*vec4(pos, 1.); vN = normalMatrix*nrm; vV = -mv.xyz; gl_Position = projectionMatrix*mv; }`;
+const headVS = `varying vec3 vN, vV, vW; varying float vU;
+  void main(){ vU = 0.; vW = normal; vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalMatrix*normal; vV = -mv.xyz; gl_Position = projectionMatrix*mv; }`;
 const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade, uSq; varying vec3 vN, vV, vW; varying float vU;
   void main(){
     float f = 1.-abs(dot(normalize(vN), normalize(vV)));
@@ -72,6 +81,7 @@ const tubeFS = `uniform vec3 uCol; uniform float uTime, uBoost, uFade, uSq; vary
     c += uCol*uSq*(.16+.2*smoothstep(.2,1.,sin(vU*1.1 + uTime*7.)));   // tightening a coil: slow bright waves run down the body
     gl_FragColor = vec4(c*uFade, 1.);
   }`;
+const HEADG = new THREE.SphereGeometry(1, 16, 12);
 function tubeIndex() { const idx = []; for (let i = 0; i < MAXPT - 1; i++) for (let k = 0; k < RING; k++) { const a = i*RING + k, b = i*RING + (k + 1)%RING, c = a + RING, d = b + RING; idx.push(a, b, c, b, d, c); } return idx; }
 const IDX = tubeIndex();
 const eyeW = new THREE.MeshBasicMaterial({ color: 0xffffff }), eyeB = new THREE.MeshBasicMaterial({ color: 0x05060d });
@@ -89,18 +99,21 @@ function label(text, col, human) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false })); const k = human ? 1.25 : 0.9; s.scale.set(7.8*k, 1.95*k, 1); s.renderOrder = human ? 6 : 5; return s;
 }
 const VIS = [];
+// the ring layout is the same for every snake and never changes: which point a vertex belongs to, and where on the ring it sits
+const RINGA = (() => { const aI = new Float32Array(MAXPT*RING), aC = new Float32Array(MAXPT*RING), aS = new Float32Array(MAXPT*RING);
+  for (let i = 0; i < MAXPT; i++) for (let q = 0; q < RING; q++) { const o = i*RING + q, th = q/RING*Math.PI*2; aI[o] = i; aC[o] = Math.cos(th); aS[o] = Math.sin(th); }
+  return { aI: new THREE.BufferAttribute(aI, 1), aC: new THREE.BufferAttribute(aC, 1), aS: new THREE.BufferAttribute(aS, 1), pos: new THREE.BufferAttribute(new Float32Array(MAXPT*RING*3), 3), idx: new THREE.BufferAttribute(new Uint32Array(IDX), 1) }; })();
 function vis(i) {
   if (VIS[i]) return VIS[i];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXPT*RING*3), 3).setUsage(THREE.DynamicDrawUsage));
-  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(MAXPT*RING*3), 3).setUsage(THREE.DynamicDrawUsage));
-  g.setAttribute('aU', new THREE.BufferAttribute(new Float32Array(MAXPT*RING), 1).setUsage(THREE.DynamicDrawUsage));
-  g.setIndex(IDX); g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
-  const mat = new THREE.ShaderMaterial({ uniforms: { uCol: { value: new THREE.Color() }, uTime: U.time, uBoost: { value: 0 }, uFade: { value: 1 }, uSq: { value: 0 } }, vertexShader: tubeVS, fragmentShader: tubeFS });
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', RINGA.pos); g.setAttribute('aI', RINGA.aI); g.setAttribute('aC', RINGA.aC); g.setAttribute('aS', RINGA.aS);
+  g.setIndex(RINGA.idx); g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
+  const D = new Float32Array(MAXPT*4), tex = new THREE.DataTexture(D, MAXPT, 1, THREE.RGBAFormat, THREE.FloatType); tex.minFilter = tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  const uniforms = { uCol: { value: new THREE.Color() }, uTime: U.time, uBoost: { value: 0 }, uFade: { value: 1 }, uSq: { value: 0 }, uPts: { value: tex }, uN: { value: 0 }, uY: { value: 0 } };
+  const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: tubeVS, fragmentShader: tubeFS });
   const body = new THREE.Mesh(g, mat); body.frustumCulled = false;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mat);
+  const head = new THREE.Mesh(HEADG, new THREE.ShaderMaterial({ uniforms, vertexShader: headVS, fragmentShader: tubeFS }));   // the same uniforms: one colour, one blink
   scene.add(body, head);
-  return VIS[i] = { body, head, mat, g, tag: null, tagName: '', fan: null, sqA: 0 };
+  return VIS[i] = { body, head, mat, g, D, tex, tag: null, tagName: '', fan: null, sqA: 0 };
 }
 
 const FANMAX = 64;
@@ -264,7 +277,6 @@ let RINGN = -1;   // how far along the drawn body the coil goes
 const PX = new Float32Array(MAXPT), PZ = new Float32Array(MAXPT), PU = new Float32Array(MAXPT);
 // the body from the drawn head back along the laid points, cut at exactly its length so the tail glides instead of hopping
 function buildTube(v, s, hx, hz, L, r, pre) {
-  const P = v.g.attributes.position.array, N = v.g.attributes.normal.array, A = v.g.attributes.aU.array;
   const fx = Math.cos(s.a), fz = Math.sin(s.a), tr = s.tr, want = L*G.SEG;
   // a coil that tightened on this tick is drawn part of the way there, so it glides in instead of stepping 20 times a second
   const sq = s.sq, pull = sq && sq.tm === curTick && sq.f < 1 ? 1 + (1/sq.f - 1)*(1 - ALPHA) : 1; RINGN = -1;
@@ -279,23 +291,20 @@ function buildTube(v, s, hx, hz, L, r, pre) {
   while (k < tr.length && (tr[k][0] - bx)*bfx + (tr[k][1] - bz)*bfz > -0.05) k++;   // points the drawn head has not reached yet
   const baseU = ((s.n || 0) - k + 1)*G.SEG + (k < tr.length ? Math.hypot(tr[k][0] - bx, tr[k][1] - bz) : 0);
   PU[0] = baseU + cum; for (let j = 1, run = 0; j < n; j++) { run += Math.hypot(PX[j] - PX[j - 1], PZ[j] - PZ[j - 1]); PU[j] = baseU + cum - run; }
+  // Where the body runs straight, most of its points add nothing: one is kept every 1.5 units there, all of them in a
+  // bend. A snake going straight is drawn with a third of the triangles, and a third of the work to build them.
+  const k0 = k; let bend = 0;
   for (; k < tr.length && n < MAXPT; k++) {
-    let x = tr[k][0], z = tr[k][1]; if (sq && k <= sq.k) { if (pull !== 1) { x = sq.cx + (x - sq.cx)*pull; z = sq.cz + (z - sq.cz)*pull; } RINGN = n; }
+    let x = tr[k][0], z = tr[k][1]; const coil = sq && k <= sq.k; if (coil && pull !== 1) { x = sq.cx + (x - sq.cx)*pull; z = sq.cz + (z - sq.cz)*pull; }
     const d = Math.hypot(x - PX[n - 1], z - PZ[n - 1]);
     if (cum + d >= want) { const f = d > 0 ? (want - cum)/d : 0; PX[n] = PX[n - 1] + (x - PX[n - 1])*f; PZ[n] = PZ[n - 1] + (z - PZ[n - 1])*f; PU[n] = PU[n - 1] - d*f; cum = want; n++; break; }
+    if (k > k0 + 2 && k + 1 < tr.length) { const a = tr[k - 1], b = tr[k], c = tr[k + 1]; bend += ((b[0] - a[0])*(c[1] - b[1]) - (b[1] - a[1])*(c[0] - b[0]))*4; if (bend < 0.07 && bend > -0.07 && d < 1.1) continue; }
+    bend = 0; if (coil) RINGN = n;
     cum += d; PX[n] = x; PZ[n] = z; PU[n] = ((s.n || 0) - k)*G.SEG; n++;
   }
-  const total = Math.max(cum, 0.01), cy = r*0.95; let run = 0;
-  for (let i = 0; i < n; i++) {
-    if (i) run += Math.hypot(PX[i] - PX[i - 1], PZ[i] - PZ[i - 1]);
-    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = PX[a] - PX[b], tz = PZ[a] - PZ[b]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    const f = run/total, rr = r*G.taper(f), sx = -tz, sz = tx;
-    for (let q = 0; q < RING; q++) { const c = COS[q], sn = SIN[q], nx = sx*c, nz = sz*c, o = (i*RING + q)*3;
-      P[o] = PX[i] + nx*rr; P[o + 1] = cy + sn*rr; P[o + 2] = PZ[i] + nz*rr; N[o] = nx; N[o + 1] = sn; N[o + 2] = nz; A[i*RING + q] = PU[i]; }
-  }
-  v.g.setDrawRange(0, Math.max(0, n - 1)*RING*6);
-  // send the GPU only the vertices in use, not the whole 720-point buffer
-  const at = v.g.attributes; for (const [a, k] of [[at.position, 3], [at.normal, 3], [at.aU, 1]]) { a.clearUpdateRanges(); a.addUpdateRange(0, n*RING*k); a.needsUpdate = true; }
+  const total = Math.max(cum, 0.01), D = v.D; let run = 0;
+  for (let i = 0, o = 0; i < n; i++, o += 4) { if (i) run += Math.hypot(PX[i] - PX[i - 1], PZ[i] - PZ[i - 1]); D[o] = PX[i]; D[o + 1] = PZ[i]; D[o + 2] = r*G.taper(run/total); D[o + 3] = PU[i]; }
+  v.tex.needsUpdate = true; v.mat.uniforms.uN.value = n; v.mat.uniforms.uY.value = r*0.95; v.g.setDrawRange(0, Math.max(0, n - 1)*RING*6);
   return n;
 }
 const COS = Array.from({ length: RING }, (_, q) => Math.cos(q/RING*Math.PI*2)), SIN = Array.from({ length: RING }, (_, q) => Math.sin(q/RING*Math.PI*2));
@@ -363,7 +372,7 @@ function drawWorld(dt) {
     for (let k = 0; k < 2; k++) { const side = k ? 1 : -1, ex = hx + fx*hr*0.45 + sx*side*hr*0.5, ez = hz + fz*hr*0.45 + sz*side*hr*0.5, ey = r*0.95 + hr*0.55, a = hr*0.34, b = hr*0.19;
       eyeM.makeScale(a, a, a).setPosition(ex, ey, ez); EYEW.setMatrixAt(ei, eyeM); eyeM.makeScale(b, b, b).setPosition(ex + fx*hr*0.17, ey + hr*0.08, ez + fz*hr*0.17); EYEB.setMatrixAt(ei, eyeM); ei++; }
     tmpC.setHex(col);
-    if (QL > 0) for (let k = 3; k < np; k += 7) glowAt(PX[k], 0.3, PZ[k], tmpC, r*6*(1 - k/np*0.5));
+    if (QL > 0 && s.id === ME) for (let k = 2; k < np; k += 3) glowAt(PX[k], 0.3, PZ[k], tmpC, r*6*(1 - k/np*0.5));
     glowAt(hx, 0.2, hz, tmpC, r*11);
     if (s.boosting && Math.random() < (QL > 0 ? 0.6 : 0.25)) spark(PX[np - 1], r, PZ[np - 1], (Math.random() - 0.5)*3, 1 + Math.random()*2, (Math.random() - 0.5)*3, col, 0.5, 0.45);
     if (MODE !== 'demo' && s.id !== ME) { const key = (s.bot ? 'b:' : 'h:') + s.name; if (!v.tag || v.tagName !== key) { if (v.tag) { scene.remove(v.tag); v.tag.material.map.dispose(); v.tag.material.dispose(); } v.tag = label(s.name, col, !s.bot); v.tagName = key; scene.add(v.tag); } v.tag.visible = true; v.tag.position.set(hx, r*2 + (s.bot ? 2.0 : 2.5), hz); }
@@ -537,7 +546,7 @@ $('oInvite').onclick = netInvite;
 
 // ---- the loop: fixed-step rules, free-running pictures, and a speed check ----
 const PROF = { draw: 0, render: 0 };
-let STATS = false, verTaps = 0, verT = 0;
+let STATS = false, verTaps = 0, verT = 0, shaderBad = false;
 let last = performance.now(), fpsT = 0, frames = 0, msSum = 0, QL = 1; const FT = [];
 function setQ() { R.setPixelRatio(DPR); resize(); }
 let CAP = 0;   // 0: every refresh; otherwise draw only when this many ms have passed (an even 60 on a 90/120 Hz screen)
@@ -559,6 +568,7 @@ function loop(t) {
       // a fast screen the phone cannot keep up with: an even 60 looks far smoother than an uneven 120
       if (!CAP && base < 13) CAP = 12.5;
       else if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
+    if (!shaderBad && R.info.programs && R.info.programs.some((p) => p.diagnostics && p.diagnostics.runnable === false)) { shaderBad = true; $('ver').textContent = 'v' + VERSION + ' · графика: ошибка шейдера, напиши об этом'; }
     if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '');
     window.__fps = frames/fpsT; window.__late = late; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; FT.length = 0; }
 }
