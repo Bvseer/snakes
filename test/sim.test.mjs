@@ -54,14 +54,15 @@ console.log(fails ? fails + ' FAILED' : 'all ok');
     const R = 7, L = Math.ceil(2*Math.PI*R/G.SEG) + 8; me.L = L; me.tr = []; for (let k = L; k >= 0; k--) { const a = k/(L - 8)*Math.PI*2; G.addHead(me, q(Math.cos(a)*R), q(Math.sin(a)*R)); }
     me.a = -Math.PI/2; v.tr = []; v.L = 14; for (let k = 12; k >= 0; k--) G.addHead(v, q(0.3*(seed % 3) - 1), q(-k*0.3)); v.a = Math.PI/2; v.ta = v.a;
     const M = G.mirror(); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, true))));
-    let t = 0, on = 0, first = 0, fs = []; while (v.alive && me.alive && t++ < 600) {
+    let t = 0, on = 0, first = 0, fs = [], cc = [0, 0], cr = R; while (v.alive && me.alive && t++ < 700) {
       // the player keeps going round, leaning slightly inwards (what you do holding the turn a little)
-      const ang = Math.atan2(me.z, me.x); me.ta = ang - Math.PI/2 - 0.12; me.turn = 0;
+      // the player rides their own coil: round its middle, easing in or out to stay on it as it draws in
+      const dx = me.x - cc[0], dz = me.z - cc[1], ang = Math.atan2(dz, dx); me.ta = ang - Math.PI/2 - Math.max(-0.5, Math.min(0.5, (Math.hypot(dx, dz) - cr)*0.5)); me.turn = 0;
       G.step(S); G.apply(M, JSON.parse(JSON.stringify(G.snap(S, false))));
       const a = S.sn[0].tr, b = M.sn[0].tr; if (a.length !== b.length || a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1])) drift++;
-      const e = S.ev.find((x) => x.t === 'sq' && x.i === 0); if (e) { on++; if (!first) first = t; fs.push(e.f); } }
+      const e = S.ev.find((x) => x.t === 'sq' && x.i === 0); if (e) { on++; if (!first) first = t; fs.push(e.f); cc = [e.cx, e.cz]; cr = e.r; } }
     // once it starts it pulls on every tick (no stutter), and it starts gently
-    if (first) { steady.push(on/(t - first + 1)); if (fs.length > 6 && !(fs[0] > fs[6])) gentle = false; }
+    if (first) { steady.push(on/(t - first + 1)); if (fs.length > 30 && !(fs[0] > fs[30])) gentle = false; }
     if (!v.alive) { died++; ticks.push((t/20).toFixed(1) + 's'); } }
   const worst = Math.min(...steady);
   console.log('squeeze: trapped snake died', died + '/8', 'after', ticks.join(','), '| pulling on', Math.round(worst*100) + '% of ticks at worst | gentle start', gentle, '| phone out of step on', drift, 'ticks');

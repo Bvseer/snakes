@@ -1,8 +1,8 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.27';
+import * as G from './sim.js?v=1.28';
 
-export const VERSION = '1.27';
+export const VERSION = '1.28';
 const API = 'https://snakes.basirxujamuradov.workers.dev', BOT = 'NeonSnakesGameBot';
 const $ = (id) => document.getElementById(id);
 const TG = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData ? Telegram.WebApp : null;
@@ -322,15 +322,11 @@ function ahead(v, s, bx, bz, dt, lead) {
 const COIL = { role: null, was: null, name: '', tight: 0, endT: 0, beatT: 0, zoom: 1, cx: 0, cz: 0, r: 0, look: 0, fit: 0 };
 function coilFeel(dt) {
   const now = performance.now(), role = COIL.role;
-  if (role && !COIL.was && now - COIL.endT > 900) {
-    if (role === 'prey') { big('Тебя душат!<small>' + esc(COIL.name) + ' сжимает кольцо — вырывайся</small>', 1000); haptic('heavy'); }
-    else { big('Кольцо сжимается<small>держи ' + esc(COIL.name || 'змейку') + ' внутри</small>', 900); haptic('medium'); } }
   if (!role && COIL.was) COIL.endT = now;
   COIL.was = role;
-  $('danger').style.opacity = role === 'prey' ? (0.45 + 0.45*COIL.tight)*(0.75 + 0.25*Math.sin(now/140)) : 0;
-  if (role && now - COIL.beatT > 420 - 170*COIL.tight) { COIL.beatT = now; if (role === 'prey') { beep(64 + 40*COIL.tight, 0.2, 'sine', 0.11, 38); haptic('light'); } else beep(120 + 110*COIL.tight, 0.14, 'triangle', 0.035, 90); }
+  $('danger').style.opacity = role === 'prey' ? 0.18 + 0.32*COIL.tight : 0;   // a quiet red edge for the one inside, stronger as it tightens
   // both of them see the whole coil: the camera eases over towards its middle and pulls back far enough to fit it
-  COIL.look += ((role === 'coil' ? 0.6 : role === 'prey' ? 0.45 : 0) - COIL.look)*Math.min(1, dt*2.5); COIL.fit += ((role ? COIL.r*3.8 + 3 : 0) - COIL.fit)*Math.min(1, dt*2.5);
+  COIL.look += ((role ? 0.4 : 0) - COIL.look)*Math.min(1, dt*0.9); COIL.fit += ((role ? COIL.r*3.6 + 2 : 0) - COIL.fit)*Math.min(1, dt*0.9);
 }
 function drawWorld(dt) {
   const al = ALPHA;
@@ -353,12 +349,11 @@ function drawWorld(dt) {
     const np = buildTube(v, s, hx, hz, Lr, r, pre);
     // tightening a coil around someone: the floor inside lights up, the body pulses, sparks are drawn inwards
     const sq = s.sq, coiling = !!sq && curTick - sq.tm <= 2 && RINGN > 6;
-    v.sqA += ((coiling ? 1 : 0) - v.sqA)*Math.min(1, dt*(coiling ? 5 : 7)); v.mat.uniforms.uSq.value = v.sqA;
+    v.sqA += ((coiling ? 1 : 0) - v.sqA)*Math.min(1, dt*(coiling ? 1.2 : 3)); v.mat.uniforms.uSq.value = v.sqA*0.4;
     if (coiling) { const tight = Math.max(0, Math.min(1, (8 - sq.r)/5.5)), prey = M.sn[sq.v];
-      fanBuild(v, RINGN, sq.cx, sq.cz); v.fan.material.uniforms.uA.value = v.sqA*(0.55 + 0.6*tight);
-      if (QL > 0 && Math.random() < 0.45) { const j = Math.floor(Math.random()*RINGN), dx = sq.cx - PX[j], dz = sq.cz - PZ[j], d = Math.hypot(dx, dz) || 1, sp = 2.5 + Math.random()*3; spark(PX[j], 0.5, PZ[j], dx/d*sp, 1.4, dz/d*sp, col, 0.4, 0.38); }
+      fanBuild(v, RINGN, sq.cx, sq.cz); v.fan.material.uniforms.uA.value = v.sqA*(0.22 + 0.3*tight);
       if (MODE !== 'demo') { if (prey && prey.alive && prey.id === ME) { COIL.role = 'prey'; COIL.name = s.name; COIL.tight = tight; COIL.cx = sq.cx; COIL.cz = sq.cz; COIL.r = sq.r; } else if (s.id === ME && COIL.role !== 'prey') { COIL.role = 'coil'; COIL.name = prey ? prey.name : ''; COIL.tight = tight; COIL.cx = sq.cx; COIL.cz = sq.cz; COIL.r = sq.r; } } }
-    else if (v.fan) v.fan.material.uniforms.uA.value = v.sqA*0.55;
+    else if (v.fan) v.fan.material.uniforms.uA.value = v.sqA*0.22;
     if (v.fan) v.fan.visible = v.sqA > 0.02;
     const hr = r*1.18; v.head.position.set(hx, r*0.95, hz); v.head.scale.setScalar(hr);
     const fx = Math.cos(ha), fz = Math.sin(ha), sx = -fz, sz = fx;

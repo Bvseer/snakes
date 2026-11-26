@@ -159,7 +159,7 @@ function think2(S, s, g) {
 // holds, it draws in towards its middle like a constrictor: gently at first, then steadily, until there is no room
 // left inside. It is judged by how far round the body winds, not by the head touching the body, so the pull does
 // not stutter while the snake keeps circling.
-export const SQUEEZE = 1.0, COILMIN = 2.2;   // units per second the coil closes in; the tightest it gets
+export const SQUEEZE = 0.45, COILMIN = 2.2;   // units per second the coil closes in; the tightest it gets
 export function squeeze(s, k, cx, cz, f) { const t = s.tr; for (let i = 0; i <= k && i < t.length; i++) t[i] = [q(cx + (t[i][0] - cx)*f), q(cz + (t[i][1] - cz)*f)]; }
 function coil(S, s) {
   const t = s.tr, r = radius(s.L), reach = s.L*SEG/Math.PI + 1, gapMax = 3 + 3*r;
@@ -175,7 +175,7 @@ function coil(S, s) {
   // the middle it pulls towards moves smoothly, or the whole coil would shiver
   if (s.coilC) { cx = s.coilC[0] + (cx - s.coilC[0])*0.25; cz = s.coilC[1] + (cz - s.coilC[1])*0.25; } s.coilC = [cx, cz];
   let rad = 0; for (let i = 0; i <= k; i++) rad += Math.hypot(t[i][0] - cx, t[i][1] - cz); rad /= k + 1;
-  s.coilT = Math.min(1, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/0.7), ease = e*e*(3 - 2*e);
+  s.coilT = Math.min(2.5, (s.coilT || 0) + TICK); const e = Math.min(1, s.coilT/2.5), ease = e*e*(3 - 2*e);   // two and a half seconds to reach full pull
   const f = rad <= COILMIN ? 1 : Math.max(0.9, 1 - SQUEEZE*ease*TICK/rad); cx = q(cx); cz = q(cz);
   if (f < 1) squeeze(s, k, cx, cz, f);
   S.ev.push({ t: 'sq', i: s.i, k, cx, cz, f, v: who.i, r: q(rad) });
