@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check the server and the game rules
-        run: node --check server/worker.js && node test/sim.test.mjs && node test/bots.test.mjs && node test/endless.test.mjs
+        run: node --check server/worker.js && node test/sim.test.mjs && node test/bots.test.mjs && node test/endless.test.mjs && node test/colors.test.mjs
       - name: Deploy the test copy
         if: ${{ env.CF_TOKEN != '' && env.TARGET == 'test' }}
         uses: cloudflare/wrangler-action@v3

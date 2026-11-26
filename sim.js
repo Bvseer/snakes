@@ -1,12 +1,12 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
-export const VERSION = '1.32';   // one number for the page and the server: they tell each other which one they are
+export const VERSION = '1.33';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
 export const RE = 90, BOTMIN = 8, SAFE = 1.5;
-export const COLORS = [0x00f0ff, 0xff2bd6, 0x7cff3a, 0xffb020, 0x9b6bff, 0xff4040, 0x30ffb0, 0xfff04a];
+export const COLORS = [0x00f0ff, 0xff2bd6, 0x7cff3a, 0xffb020, 0x9b6bff, 0xff4040, 0x30ffb0, 0xfff04a, 0x3d7bff, 0xf2f6ff, 0xc6ff00, 0xff9ecb];   // as many as there can be snakes: no two on the field ever wear the same
 const BOTS = ['Кобра', 'Питон', 'Мамба', 'Гадюка', 'Анаконда', 'Удав', 'Тайпан', 'Уж', 'Гюрза', 'Эфа', 'Аспид', 'Полоз', 'Медянка', 'Боа', 'Ехидна', 'Крайт'];
 
 export const radius = (L) => 0.62 + Math.min(0.6, L/450);
@@ -59,8 +59,10 @@ export function addSnake(S, id, name, bot) {
     if (i < 0) { if (S.sn.length >= MAXS) return null; i = S.sn.length; }
     [x, z, a] = spawnSpot(S);
   }
-  // a colour nobody else on the field is wearing, if there is one (a person keeps theirs)
-  let col = i; if (!S.round) { if (S.sn[i] && S.sn[i].id === String(id)) col = S.sn[i].col; else { const used = COLORS.map((_, c) => S.sn.filter((o) => o.alive && o.col === c).length); const low = Math.min(...used); const free = used.map((u, c) => u === low ? c : -1).filter((c) => c >= 0); col = free[Math.floor(S.rnd()*free.length)]; } }
+  // a colour nobody else on the field is wearing: there are as many colours as there can be snakes, so there always
+  // is one. A person coming back keeps theirs, unless somebody took it while they were away.
+  let col = i; if (!S.round) { const used = COLORS.map((_, c) => S.sn.filter((o, k) => k !== i && o.alive && o.col === c).length), mine = S.sn[i] && S.sn[i].id === String(id) ? S.sn[i].col : -1;
+    if (mine >= 0 && !used[mine]) col = mine; else { const low = Math.min(...used), free = used.map((u, c) => u === low ? c : -1).filter((c) => c >= 0); col = free[Math.floor(S.rnd()*free.length)]; } }
   const s = { i, id: String(id), name: String(name).slice(0, 16), bot: !!bot, col, x, z, a, ta: a, boost: false, L: L0, tr: [], alive: true, kills: 0, place: 0, dropT: 0, best: L0,
     safe: S.round ? 0 : S.tm + SAFE, born: S.tm, n: 0,
     ai: bot ? { skill: 0.8 + S.rnd()*0.2, goal: null, think: 0, hunt: 0, v: 2 } : null };
