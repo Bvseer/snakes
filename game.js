@@ -1,6 +1,6 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.33';
+import * as G from './sim.js?v=1.34';
 
 const VERSION = G.VERSION;
 // the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
