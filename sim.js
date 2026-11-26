@@ -1,7 +1,7 @@
 // Neon snakes: the whole game in one place. The server runs it for rooms, the phone runs it for solo play,
 // and phones use addHead() to rebuild every body from the heads the server sends, so bodies cost nothing on the wire.
 
-export const VERSION = '1.35';   // one number for the page and the server: they tell each other which one they are
+export const VERSION = '1.36';   // one number for the page and the server: they tell each other which one they are
 export const TICK = 1/20, ROUND = 120, R0 = 48, RMIN = 18, SHRINK = 50;   // seconds, units
 export const SEG = 0.5, V = 7, VB = 13, TURN = 3.6, L0 = 18, LMIN = 10, MAXS = 12, ROUNDS = 6;
 // the endless arena: much bigger, never closes in; at least BOTMIN snakes on it at any time
@@ -358,3 +358,21 @@ export function apply(M, o) {
   if (o.fa) for (const f of o.fa) M.food.set(f[0], [f[1]/100, f[2]/100, f[3]/10]);
   return o.ev || [];
 }
+
+// ---- playing back what arrives unevenly ---------------------------------------
+// The arena sends a tick every 50 ms, but over the air they arrive in fits and starts: nothing for a quarter of a
+// second, then five at once. A phone keeps its own steady clock of "which tick is it now on the server", plays the
+// arena a little behind that clock, and makes "a little" as long as the line has lately been uneven — so the
+// picture keeps moving through the gaps instead of freezing and then jumping.
+export function playClock() { return { off: -1e12, jit: 0, depth: 1.6, last: 0, dry: 0 }; }
+// a tick has arrived (now in ms)
+export function clockHeard(C, tm, now) { const o = tm - now*0.02;
+  if (C.off < -1e11 || o - C.off > 40 || C.off - o > 40) { C.off = o; C.jit = 0; C.depth = 1.6; }   // the first one, or the arena started over
+  else C.off = Math.max(C.off - (now - C.last)*0.00002, o);          // the luckiest arrival sets the clock; it forgets slowly, in case the line itself got slower
+  const late = Math.max(0, C.off + now*0.02 - tm); C.jit = Math.max(C.jit*0.994, Math.min(8, late));   // how late ticks have been coming lately, in ticks
+  const want = Math.max(1.4, Math.min(6.5, 1.3 + C.jit*1.15)); C.depth += (want - C.depth)*(want > C.depth ? 0.6 : 0.01); C.last = now; }
+// where to be in the arena's time on this frame: steady, never backwards, never past what has arrived
+export function clockPlay(C, play, lastTick, dt, now) { const target = C.off + now*0.02 - C.depth;
+  let p = Math.abs(target - play) > 12 ? target : play + dt*20*(1 + Math.max(-0.15, Math.min(0.2, (target - play)*0.12)));
+  if (p > lastTick) { p = lastTick; C.dry++; } return p; }
+

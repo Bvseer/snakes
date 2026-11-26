@@ -1,6 +1,6 @@
 // Neon snakes: drawing, controls, menus and the connection to a room. The rules live in sim.js.
 import * as THREE from 'three';
-import * as G from './sim.js?v=1.35';
+import * as G from './sim.js?v=1.36';
 
 const VERSION = G.VERSION;
 // the game talks to the server it was loaded from (the real one or the test copy); a preview elsewhere uses the real one
@@ -196,7 +196,7 @@ for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => { try { 
 let FIXED = false; try { FIXED = localStorage.getItem('fixed') === '1'; } catch (e) {}
 function arenaLabel(f) { return f ? '⭕ Арена: не сжимается' : '🎯 Арена: сжимается'; }
 let FT0 = performance.now();   // the time of the frame being drawn: prediction and ticks all measure against it
-let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0;
+let ALPHA = 1, Q = [], playTick = 0, lastTick = 0, curTick = 0, CLK = G.playClock();
 let MODE = 'demo', LS = null, M = G.mirror(), ME = null, NET = null, acc = 0, overShown = false, lastCount = 99;
 // your snake is (re)born: the death card goes, the controls start fresh
 let DEATH = null, BORN = 0, deathT = 0;
@@ -504,16 +504,14 @@ function netMsg(N, m) {
 }
 // phones get ticks unevenly over the air; play them back a couple of ticks late, at an even pace
 function netSnap(s) {
-  if (s.full && (!M.ready || s.tm < lastTick - 5 || (NET && NET.fresh))) { if (NET) NET.fresh = false; Q.length = 0; applySnap(s); playTick = lastTick = s.tm; ALPHA = 1; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; return; }
-  if (!M.ready) return; Q.push(s); lastTick = s.tm;
+  if (s.full && (!M.ready || s.tm < lastTick - 5 || (NET && NET.fresh))) { if (NET) NET.fresh = false; Q.length = 0; applySnap(s); playTick = lastTick = s.tm; CLK = G.playClock(); G.clockHeard(CLK, s.tm, performance.now()); ALPHA = 1; AUTH = null; INLOG.length = 0; corrX = corrZ = corrA = 0; return; }
+  if (!M.ready) return; Q.push(s); lastTick = s.tm; G.clockHeard(CLK, s.tm, performance.now());
   const i = M.sn.findIndex((v) => v.id === ME), h = i >= 0 && s.sn[i];
   if (h) setAuth(h[1]/100, h[2]/100, h[3]/100, h[4]/100, !!(h[5] & 1), performance.now() - RTT*500, s.tm/20);
 }
 function netPlay(dt) {
   if (MODE !== 'net' || !M.ready) return;
-  const target = lastTick - 1.4;
-  if (Math.abs(target - playTick) > 10) playTick = target; else playTick += dt*20*(1 + Math.max(-0.12, Math.min(0.12, (target - playTick)*0.08)));
-  if (playTick > lastTick) playTick = lastTick;
+  playTick = G.clockPlay(CLK, playTick, lastTick, dt, performance.now());
   while (Q.length && Q[0].tm <= playTick) applySnap(Q.shift());
   ALPHA = Math.max(0, Math.min(1, playTick - curTick));
 }
@@ -569,7 +567,7 @@ function loop(t) {
       if (!CAP && base < 13) CAP = 12.5;
       else if (DPR > 1) { DPR = Math.max(1, DPR - 0.2); setQ(); } else if (QL > 0) { QL = 0; setQ(); } }
     if (!shaderBad && R.info.programs && R.info.programs.some((p) => p.diagnostics && p.diagnostics.runnable === false)) { shaderBad = true; $('ver').textContent = 'v' + VERSION + ' · графика: ошибка шейдера, напиши об этом'; }
-    if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '');
+    if (STATS) $('ver').textContent = 'v' + VERSION + ' · ' + Math.round(frames/fpsT) + ' fps · late ' + Math.round(late*100) + '% · ' + DPR.toFixed(2) + 'x' + (QL ? '' : ' lo') + (CAP ? ' · 60' : '') + (MODE === 'net' ? ' · пинг ' + Math.round(RTT*1000) + ' · буфер ' + Math.round(CLK.depth*50) + ' мс · неровность ' + Math.round(CLK.jit*50) + ' мс · замираний ' + CLK.dry : ''); CLK.dry = 0;
     window.__fps = frames/fpsT; window.__late = late; window.__ms = msSum/frames; fpsT = 0; frames = 0; msSum = 0; FT.length = 0; }
 }
 
